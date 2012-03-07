@@ -44,3 +44,5 @@ FLAGS.set_default('sqlite_synchronous', False)
 flags.DECLARE('policy_file', 'nova.policy')
 flags.DECLARE('compute_scheduler_driver', 'nova.scheduler.multi')
 FLAGS.set_default('policy_file', 'nova/tests/policy.json')
+# Quickly timeout rpc tests
+FLAGS.set_default('rpc_response_timeout', 5)
