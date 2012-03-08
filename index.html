@@ -8,9 +8,9 @@
   <style type="text/css">
     body {
       margin-top: 1.0em;
-      background-color: #58a64b;
+      background-color: #FFFFFF;
       font-family: Helvetica, Arial, FreeSans, san-serif;
-      color: #ffffff;
+      color: black;
     }
     #container {
       margin: 0 auto;
@@ -57,9 +57,9 @@
       <h2>Install</h2>
       <p>OpenStack Nova ZeroMQ RPC Driver
 
-Deployment guide
+<h1>Deployment guide</h1>
 
-Abstract
+<h2>Abstract</h2>
 
 
 With Folsom, Nova introduces an optional messaging system using ZeroMQ.  For some Nova deployments it may be desirable to use a broker-less RPC mechanism.  This document provides deployment information for this driver.
@@ -71,7 +71,7 @@ Enabling
 
 To enable the driver, the ‘rpc_backend’ flag must be passed to each Nova service. The value of this flag should be ‘nova.rpc.impl_zmq’.
 
-DNS
+<h2>DNS
 
 
 All TCP connections are made to hostnames. To specify, these are hostnames, not FQDNs. Host resolution is mandatory. The best practice is to deploy viable nameservers which can resolve all hostnames in the cloud under a single domain. Machines should then have dns search domain to resolve the bare hostnames.
@@ -184,12 +184,16 @@ This driver should be deployed in a trusted environment.</p>
 
     
       <h2>Authors</h2>
-      <p>Christopher MacGown (chris@pistoncloud.com)<br/>Duncan McGreggor (duncan@dreamhost.com)<br/>Eric Windisch (eric@cloudscaling.com)<br/>Zed Shaw (zedshaw@zedshaw.com)</p>
+      <p>Christopher MacGown (chris@pistoncloud.com)
+<br/>Duncan McGreggor (duncan@dreamhost.com)
+<br/>Eric Windisch (eric@cloudscaling.com)
+<br/>Zed Shaw (zedshaw@zedshaw.com)</p>
     
 
     
       <h2>Contact</h2>
-      <p>Eric Windisch (eric@cloudscaling.com)<br/>      </p>
+      <p>Eric Windisch (eric@cloudscaling.com)
+<br/>      </p>
     
 
     <h2>Download</h2>
