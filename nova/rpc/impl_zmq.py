@@ -718,7 +718,8 @@ def fanout_cast(context, topic, msg):
     """ Send a message to all listening and expect no reply """
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _send("cast", context, str(topic), msg, sock_type=TopicManager.ROUTER_PUB)
+    _send("cast", context, str(topic), msg,
+	  socket_type=TopicManager.ROUTER_PUB)
 
 
 def notify(context, topic, msg):
