@@ -709,10 +709,10 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     # This supports brokerless fanout (addresses > 1)
     for addr in addresses:
         if style == "cast":
-            eventlet.spawn_n(_realsend, style, context, topic, msg,
+            eventlet.spawn_n(_send, style, context, topic, msg,
                              socket_type, timeout)
         else:
-            return _realsend(style, context, topic, msg, socket_type, timeout)
+            return _send(style, context, topic, msg, socket_type, timeout)
 
 
 def create_connection(new=True):
