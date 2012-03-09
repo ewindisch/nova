@@ -117,7 +117,7 @@ class TopicManager(object):
             'volume_topic',
             'network_topic',
             'vsa_topic',
-	    'cert_topic',
+            'cert_topic',
         ]
         # Static list of topics
         # 'test' - used by test suite
@@ -193,13 +193,13 @@ class MatchMakerBase(object):
     def __init__(self):
         pass
 
-    def get_worker(self, context, sock_type, topic):
+    def get_workers(self, context, sock_type, topic):
         # Get a host on bare topics.
         # Not needed for ROUTER_PUB which is always brokered.
         if '.' not in topic and sock_type != TopicManager.ROUTER_PUSH \
                             and sock_type != TopicManager.ROUTER_PUB:
             (topic, sock_type) = self.get_addr_args(context, topic)
-        return TopicManager.addr(topic, sock_type)
+        return [TopicManager.addr(topic, sock_type)]
 
 
 class MatchMakerTopicScheduler(MatchMakerBase):
@@ -236,6 +236,23 @@ class MatchMakerRing(MatchMakerBase):
     def get_addr_args(self, context, topic):
         host = self.ring0[topic].next()
         return (topic + '.' + host, TopicManager.PUSH)
+
+
+class MatchMakerFanoutRing(MatchMakerRing):
+    """
+       Match Maker where hosts are loaded from a static file
+       - with support for brokerless fanout
+    """
+    def get_workers(self, context, sock_type, topic):
+        # Get a host on bare topics.
+        # Not needed for ROUTER_PUB which is always brokered.
+        if '.' not in topic and sock_type != TopicManager.ROUTER_PUSH:
+            (topic, sock_type) = self.get_addr_args(context, topic)
+        elif sock_type == TopicManager.ROUTER_PUB:
+            sock_type = TopicManager.PUSH
+            return map(lambda h: TopicManager.addr(topic + '.' + h, sock_type),
+                       self.ring0[topic])
+        return [TopicManager.addr(topic, sock_type)]
 
 
 class QueueSocket(object):
@@ -596,27 +613,7 @@ class Connection(object):
         eventlet.spawn(self.consume)
 
 
-def _send(style, context, topic, msg, socket_type=None, timeout=None):
-    """
-    Implements sending of messages.
-    Determines which address to send a message to
-    and sends a message, manages replies from call()
-    """
-
-    # We memoize matchmaker through this global
-    global matchmaker
-
-    timeout = timeout or FLAGS.rpc_response_timeout
-    socket_type = socket_type or TopicManager.PUSH
-
-    if topic.endswith(".None") or topic.endswith("."):
-        topic = topic.split(".")[0]
-
-    if not matchmaker:
-        constructor = globals()[FLAGS.rpc_zmq_matchmaker]
-        matchmaker = constructor()
-    addr = matchmaker.get_worker(context, socket_type, topic)
-
+def _realsend(style, context, topic, msg, socket_type=None, timeout=None):
     conn = ZmqClient(addr)
 
     if style == 'cast':
@@ -685,6 +682,36 @@ def _send(style, context, topic, msg, socket_type=None, timeout=None):
         assert False, _("Invalid call style: %s") % style
 
 
+def _send(style, context, topic, msg, socket_type=None, timeout=None):
+    """
+    Implements sending of messages.
+    Determines which address to send a message to
+    and sends a message, manages replies from call()
+    """
+
+    # We memoize matchmaker through this global
+    global matchmaker
+
+    timeout = timeout or FLAGS.rpc_response_timeout
+    socket_type = socket_type or TopicManager.PUSH
+
+    if topic.endswith(".None") or topic.endswith("."):
+        topic = topic.split(".")[0]
+
+    if not matchmaker:
+        constructor = globals()[FLAGS.rpc_zmq_matchmaker]
+        matchmaker = constructor()
+    addresses = matchmaker.get_workers(context, socket_type, topic)
+
+    # This supports brokerless fanout (addresses > 1)
+    for addr in addresses:
+        if style == "cast":
+            eventlet.spawn_n(_realsend, style, context, topic, msg,
+                             socket_type, timeout)
+        else:
+            return _realsend(style, context, topic, msg, socket_type, timeout)
+
+
 def create_connection(new=True):
     return Connection()
 
@@ -719,7 +746,7 @@ def fanout_cast(context, topic, msg):
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
     _send("cast", context, str(topic), msg,
-	  socket_type=TopicManager.ROUTER_PUB)
+          socket_type=TopicManager.ROUTER_PUB)
 
 
 def notify(context, topic, msg):
