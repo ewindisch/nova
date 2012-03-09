@@ -116,7 +116,8 @@ class TopicManager(object):
             'scheduler_topic',
             'volume_topic',
             'network_topic',
-            'vsa_topic'
+            'vsa_topic',
+	    'cert_topic',
         ]
         # Static list of topics
         # 'test' - used by test suite
