@@ -614,6 +614,7 @@ class Connection(object):
 
 
 def _realsend(style, context, topic, msg, socket_type=None, timeout=None):
+    timeout = timeout or FLAGS.rpc_response_timeout
     conn = ZmqClient(addr)
 
     if style == 'cast':
@@ -627,59 +628,62 @@ def _realsend(style, context, topic, msg, socket_type=None, timeout=None):
             pass
         finally:
             conn.close()
-    elif style == 'call':
-        # The msg_id is used to track replies.
-        msg_id = str(uuid.uuid4().hex)
-        hostname = socket.gethostname()
-        base_topic = topic.split('.', 1)[0]
-
-        # Replies always come into the reply service.
-        reply_topic = "zmq_replies.%s" % hostname
-
-        # Curry the original request into a reply method.
-        orig_payload = [RpcContext.marshal(context), msg]
-        payload = [RpcContext.marshal(context), {
-            'method': '-reply',
-            'args': {
-                'msg_id': msg_id,
-                'context': RpcContext.marshal(context),
-                'topic': reply_topic,
-                'msg': orig_payload
-            }
-        }]
-
-        all_data = []
-
-        # Messages arriving async.
-        msg_waiter = QueueSocket(
-            "ipc:///var/run/nova/zmq_reply_queue",
-            zmq.SUB, subscribe=msg_id, bind=False)
-
-        try:
-            with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
-                # We timeout no more than 30 seconds for the cast itself.
-                with Timeout(30, exception=nova.rpc.common.Timeout) as t1:
-                    conn.cast(msg_id, topic, payload)
-
-                # Blocks until receives reply
-                responses = pickle.loads(msg_waiter.recv()[-1])
-        finally:
-            conn.close()
-            msg_waiter.close()
-            del msg_waiter
-
-        # It seems we don't need to do all of the following,
-        # but perhaps it would be useful for multicall?
-        # One effect of this is that we're checking all
-        # responses for Exceptions.
-        for resp in responses:
-            if isinstance(resp, types.DictType) and 'exc' in resp:
-                raise RemoteError(*resp['exc'])
-            all_data.append(resp)
-
-        return style, topic, all_data[-1]
-    else:
+        return
+    elif style != 'call':
         assert False, _("Invalid call style: %s") % style
+        return
+
+    # if style == call:
+
+    # The msg_id is used to track replies.
+    msg_id = str(uuid.uuid4().hex)
+    hostname = socket.gethostname()
+    base_topic = topic.split('.', 1)[0]
+
+    # Replies always come into the reply service.
+    reply_topic = "zmq_replies.%s" % hostname
+
+    # Curry the original request into a reply method.
+    orig_payload = [RpcContext.marshal(context), msg]
+    payload = [RpcContext.marshal(context), {
+        'method': '-reply',
+        'args': {
+            'msg_id': msg_id,
+            'context': RpcContext.marshal(context),
+            'topic': reply_topic,
+            'msg': orig_payload
+        }
+    }]
+
+    # Messages arriving async.
+    msg_waiter = QueueSocket(
+        "ipc:///var/run/nova/zmq_reply_queue",
+        zmq.SUB, subscribe=msg_id, bind=False)
+
+    try:
+        with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
+            # We timeout no more than 30 seconds for the cast itself.
+            with Timeout(30, exception=nova.rpc.common.Timeout) as t1:
+                conn.cast(msg_id, topic, payload)
+
+            # Blocks until receives reply
+            responses = pickle.loads(msg_waiter.recv()[-1])
+    finally:
+        conn.close()
+        msg_waiter.close()
+        del msg_waiter
+
+    # It seems we don't need to do all of the following,
+    # but perhaps it would be useful for multicall?
+    # One effect of this is that we're checking all
+    # responses for Exceptions.
+    all_data = []
+    for resp in responses:
+        if isinstance(resp, types.DictType) and 'exc' in resp:
+            raise RemoteError(*resp['exc'])
+        all_data.append(resp)
+
+    return style, topic, all_data[-1]
 
 
 def _send(style, context, topic, msg, socket_type=None, timeout=None):
@@ -692,7 +696,6 @@ def _send(style, context, topic, msg, socket_type=None, timeout=None):
     # We memoize matchmaker through this global
     global matchmaker
 
-    timeout = timeout or FLAGS.rpc_response_timeout
     socket_type = socket_type or TopicManager.PUSH
 
     if topic.endswith(".None") or topic.endswith("."):
