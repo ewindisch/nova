@@ -208,7 +208,7 @@ class MatchMakerTopicScheduler(MatchMakerBase):
         pass
 
     def get_addr_args(self, context, topic):
-        host = _send("call", context,
+        host = _multi_send("call", context,
             "%s" % (topic),
             {'method': '-get_worker', 'args': {}},
             timeout=5, sock_type=TopicManager.ROUTER_PUSH)[2][0]
@@ -264,7 +264,7 @@ class QueueSocket(object):
     def __init__(self, addr, zmq_type, bind=True, recv=True, send=True,
                  subscribe=None):
         self.sock = ZMQ_CTX.socket(zmq_type)
-        self.can_send = send
+        self.can_multi_send = send
         self.can_recv = recv
         self.subscribe = subscribe
         self.addr = addr
@@ -384,7 +384,7 @@ class InternalContext(object):
             self.get_response(child_ctx, proxy, topic, msg[1]),
             ctx.replies)
 
-        _send("cast", ctx, topic, {
+        _multi_send("cast", ctx, topic, {
             'method': '-process_reply',
             'args': {
                 'msg_id': msg_id,
@@ -613,7 +613,7 @@ class Connection(object):
         eventlet.spawn(self.consume)
 
 
-def _realsend(style, context, topic, msg, socket_type=None, timeout=None):
+def _send(style, context, topic, msg, socket_type=None, timeout=None):
     timeout = timeout or FLAGS.rpc_response_timeout
     conn = ZmqClient(addr)
 
@@ -686,7 +686,7 @@ def _realsend(style, context, topic, msg, socket_type=None, timeout=None):
     return style, topic, all_data[-1]
 
 
-def _send(style, context, topic, msg, socket_type=None, timeout=None):
+def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     """
     Implements sending of messages.
     Determines which address to send a message to
@@ -723,7 +723,7 @@ def multicall(context, topic, msg, timeout=None):
     """ Multiple calls """
     LOG.debug(_("RR MULTICALL %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    style, target, data = _send("call", context, str(topic), msg,
+    style, target, data = _multi_send("call", context, str(topic), msg,
         timeout=timeout)
     return data
 
@@ -732,7 +732,7 @@ def call(context, topic, msg, timeout=None):
     """ Send a message, expect a response """
     LOG.debug(_("RR CALL %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    style, target, data = _send("call", context, str(topic), msg,
+    style, target, data = _multi_send("call", context, str(topic), msg,
         timeout=timeout)
     return data[-1]
 
@@ -741,14 +741,14 @@ def cast(context, topic, msg):
     """ Send a message expecting no reply """
     LOG.debug(_("RR CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _send("cast", context, str(topic), msg)
+    _multi_send("cast", context, str(topic), msg)
 
 
 def fanout_cast(context, topic, msg):
     """ Send a message to all listening and expect no reply """
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _send("cast", context, str(topic), msg,
+    _multi_send("cast", context, str(topic), msg,
           socket_type=TopicManager.ROUTER_PUB)
 
 
