@@ -234,13 +234,16 @@ class MatchMakerBroker(MatchMakerBase):
 class MatchMakerRing(MatchMakerBase):
     """Match Maker where hosts are loaded from a static file"""
     def __init__(self):
-        self.ring = json.load(FLAGS.rpc_zmq_matchmaker_ringfile)
+        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
+        self.ring = json.load(fh)
         self.ring0 = {}
-        for k in keys(self.ring):
+        for k in self.ring.keys():
             self.ring0 = itertools.cycle(self.ring[k])
+        fh.close()
+        LOG.debug(_("RING:\n%s"), self.ring0)
 
     def get_addr_args(self, context, topic):
-        host = self.ring0[topic].next()
+        host = next(self.ring0)
         return (topic + '.' + host, TopicManager.PUSH)
 
 
@@ -301,10 +304,9 @@ class QueueSocket(object):
 class ZmqClient(object):
     """Client for ZMQ sockets"""
 
-    def __init__(self, addr, sock_type=zmq.PUSH, bind=False,
+    def __init__(self, addr, socket_type=zmq.PUSH, bind=False,
             recv=False):
-        self.outq = QueueSocket(addr, sock_type, bind=bind,
-                                 recv=recv)
+        self.outq = QueueSocket(addr, socket_type, bind=bind, recv=recv)
 
     def cast(self, msg_id, topic, data):
         self.outq.send([str(msg_id), str(topic), str('cast'),
@@ -619,9 +621,9 @@ class Connection(object):
         eventlet.spawn(self.consume)
 
 
-def _send(style, addr, context, topic, msg, socket_type=None, timeout=None):
+def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
     timeout = timeout or FLAGS.rpc_response_timeout
-    conn = ZmqClient(addr)
+    conn = ZmqClient(addr, socket_type)
 
     if style == 'cast':
         try:
@@ -634,12 +636,13 @@ def _send(style, addr, context, topic, msg, socket_type=None, timeout=None):
             pass
         finally:
             conn.close()
-        return
+            return
     elif style != 'call':
         assert False, _("Invalid call style: %s") % style
         return
 
     # if style == call:
+    LOG.debug("CALL CALL SAID THE RAVEN")
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
