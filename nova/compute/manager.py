@@ -912,13 +912,6 @@ class ComputeManager(manager.SchedulerDependentManager):
         :param rotation: int representing how many backups to keep around;
             None if rotation shouldn't be used (as in the case of snapshots)
         """
-        if image_type == "snapshot":
-            task_state = task_states.IMAGE_SNAPSHOT
-        elif image_type == "backup":
-            task_state = task_states.IMAGE_BACKUP
-        else:
-            raise Exception(_('Image type not recognized %s') % image_type)
-
         context = context.elevated()
         instance_ref = self.db.instance_get_by_uuid(context, instance_uuid)
 
@@ -926,8 +919,7 @@ class ComputeManager(manager.SchedulerDependentManager):
         self._instance_update(context,
                               instance_ref['id'],
                               power_state=current_power_state,
-                              vm_state=vm_states.ACTIVE,
-                              task_state=task_state)
+                              vm_state=vm_states.ACTIVE)
 
         LOG.audit(_('instance %s: snapshotting'), instance_uuid,
                   context=context)
@@ -2351,7 +2343,10 @@ class ComputeManager(manager.SchedulerDependentManager):
             if vm_power_state == db_power_state:
                 continue
 
-            if (vm_power_state in (power_state.NOSTATE, power_state.SHUTOFF)
+            if (vm_power_state in (power_state.NOSTATE,
+                                   power_state.SHUTOFF,
+                                   power_state.SHUTDOWN,
+                                   power_state.CRASHED)
                 and db_instance['vm_state'] == vm_states.ACTIVE):
                 self._instance_update(context,
                                       db_instance["id"],

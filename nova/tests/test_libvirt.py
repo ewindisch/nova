@@ -36,6 +36,7 @@ from nova import utils
 from nova.api.ec2 import cloud
 from nova.compute import instance_types
 from nova.compute import power_state
+from nova.compute import utils as compute_utils
 from nova.compute import vm_states
 from nova.virt import images
 from nova.virt import driver
@@ -60,6 +61,7 @@ FLAGS = flags.FLAGS
 LOG = logging.getLogger(__name__)
 
 _fake_network_info = fake_network.fake_get_instance_nw_info
+_fake_stub_out_get_nw_info = fake_network.stub_out_nw_api_get_instance_nw_info
 _ipv4_like = fake_network.ipv4_like
 
 
@@ -484,6 +486,10 @@ class LibvirtConnTestCase(test.TestCase):
         instance_data = dict(self.test_instance)
         self._check_xml_and_disk_prefix(instance_data)
 
+    def test_xml_disk_driver(self):
+        instance_data = dict(self.test_instance)
+        self._check_xml_and_disk_driver(instance_data)
+
     def test_xml_disk_bus_virtio(self):
         self._check_xml_and_disk_bus({"disk_format": "raw"},
                                      "disk", "virtio")
@@ -786,6 +792,19 @@ class LibvirtConnTestCase(test.TestCase):
                                  expected_result,
                                  '%s != %s failed check %d' %
                                  (check(tree), expected_result, i))
+
+    def _check_xml_and_disk_driver(self, image_meta):
+        user_context = context.RequestContext(self.user_id, self.project_id)
+        instance_ref = db.instance_create(user_context, self.test_instance)
+        network_info = _fake_network_info(self.stubs, 1)
+
+        xml = connection.LibvirtConnection(True).to_xml(instance_ref,
+                                                        network_info,
+                                                        image_meta)
+        tree = ElementTree.fromstring(xml)
+        disks = tree.findall('./devices/disk/driver')
+        for disk in disks:
+            self.assertEqual(disk.get("cache"), "none")
 
     def _check_xml_and_disk_bus(self, image_meta, device_type, bus):
         user_context = context.RequestContext(self.user_id, self.project_id)
@@ -1491,22 +1510,14 @@ class IptablesFirewallTestCase(test.TestCase):
                 return '', ''
             print cmd, kwargs
 
-        network_info = _fake_network_info(self.stubs, 1)
-
-        def get_fixed_ips(*args, **kwargs):
-            ips = []
-            for network, info in network_info:
-                ips.extend(info['ips'])
-                return [ip['ip'] for ip in ips]
-
-        def nw_info(*args, **kwargs):
-            return network_info
+        network_model = _fake_network_info(self.stubs, 1, spectacular=True)
 
         from nova.network import linux_net
         linux_net.iptables_manager.execute = fake_iptables_execute
 
-        fake_network.stub_out_nw_api_get_instance_nw_info(self.stubs,
-                                                          nw_info)
+        _fake_stub_out_get_nw_info(self.stubs, lambda *a, **kw: network_model)
+
+        network_info = compute_utils.legacy_network_info(network_model)
         self.fw.prepare_instance_filter(instance_ref, network_info)
         self.fw.apply_instance_filter(instance_ref, network_info)
 
@@ -1544,9 +1555,11 @@ class IptablesFirewallTestCase(test.TestCase):
         self.assertTrue(len(filter(regex.match, self.out_rules)) > 0,
                         "ICMP Echo Request acceptance rule wasn't added")
 
-        for ip in get_fixed_ips():
+        for ip in network_model.fixed_ips():
+            if ip['version'] != 4:
+                continue
             regex = re.compile('-A .* -j ACCEPT -p tcp -m multiport '
-                               '--dports 80:81 -s %s' % ip)
+                               '--dports 80:81 -s %s' % ip['address'])
             self.assertTrue(len(filter(regex.match, self.out_rules)) > 0,
                             "TCP port 80/81 acceptance rule wasn't added")
 

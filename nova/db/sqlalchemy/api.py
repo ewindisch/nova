@@ -518,10 +518,6 @@ def compute_node_update(context, compute_id, values, auto_adjust):
         compute_ref.save(session=session)
 
 
-# Note: these operations use with_lockmode() ... so this will only work
-# reliably with engines that support row-level locking
-# (postgres, mysql+innodb and above).
-
 def compute_node_get_by_host(context, host):
     """Get all capacity entries for the given host."""
     session = get_session()
@@ -529,10 +525,13 @@ def compute_node_get_by_host(context, host):
         node = session.query(models.ComputeNode).\
                              options(joinedload('service')).\
                              filter(models.Service.host == host).\
-                             filter_by(deleted=False).\
-                             with_lockmode('update')
+                             filter_by(deleted=False)
         return node.first()
 
+
+# Note: these operations use with_lockmode() ... so this will only work
+# reliably with engines that support row-level locking
+# (postgres, mysql+innodb and above).
 
 def compute_node_capacity_find(context, minimum_ram_mb, minimum_disk_gb):
     """Get all enabled hosts with enough ram and disk."""
@@ -1444,8 +1443,6 @@ def instance_get_by_uuid(context, uuid, session=None):
                 first()
 
     if not result:
-        # FIXME(sirp): it would be nice if InstanceNotFound would accept a
-        # uuid parameter as well
         raise exception.InstanceNotFound(instance_id=uuid)
 
     return result
@@ -1688,6 +1685,40 @@ def instance_get_all_hung_in_rebooting(context, reboot_window, session=None):
             filter_by(task_state="rebooting").all()
 
     return results
+
+
+@require_context
+def instance_test_and_set(context, instance_id, attr, ok_states,
+                          new_state, session=None):
+    """Atomically check if an instance is in a valid state, and if it is, set
+    the instance into a new state.
+    """
+    if not session:
+        session = get_session()
+
+    with session.begin():
+        query = model_query(context, models.Instance, session=session,
+                            project_only=True)
+
+        if utils.is_uuid_like(instance_id):
+            query = query.filter_by(uuid=instance_id)
+        else:
+            query = query.filter_by(id=instance_id)
+
+        # NOTE(vish): if with_lockmode isn't supported, as in sqlite,
+        #             then this has concurrency issues
+        instance = query.with_lockmode('update').first()
+
+        state = instance[attr]
+        if state not in ok_states:
+            raise exception.InstanceInvalidState(
+                attr=attr,
+                instance_uuid=instance['uuid'],
+                state=state,
+                method='instance_test_and_set')
+
+        instance[attr] = new_state
+        instance.save(session=session)
 
 
 @require_context
@@ -2091,6 +2122,7 @@ def network_get_associated_fixed_ips(context, network_id):
     # fixed_ip_get_all_by_network.
     return model_query(context, models.FixedIp, read_deleted="no").\
                     filter_by(network_id=network_id).\
+                    filter_by(allocated=True).\
                     filter(models.FixedIp.instance_id != None).\
                     filter(models.FixedIp.virtual_interface_id != None).\
                     all()
