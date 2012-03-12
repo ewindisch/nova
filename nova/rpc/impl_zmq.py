@@ -128,7 +128,7 @@ class TopicManager(object):
         expected_topics = ['test', 'nested', 'zmq_replies']
 
         for topic, module in topic_flags.items():
-        	flags.DECLARE(topic, module)
+            flags.DECLARE(topic, module)
 
         # Concat dynamic and static topic lists
         expected_topics.extend(map(lambda x: getattr(FLAGS, x),
@@ -718,7 +718,8 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
             eventlet.spawn_n(_send, addr, style, context, topic, msg,
                              socket_type, timeout)
         else:
-            return _send(addr, style, context, topic, msg, socket_type, timeout)
+            return _send(addr, style, context, topic,
+                         msg, socket_type, timeout)
 
 
 def create_connection(new=True):
