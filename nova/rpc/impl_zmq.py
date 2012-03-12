@@ -645,7 +645,6 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
         return
 
     # if style == call:
-    LOG.debug("CALL CALL SAID THE RAVEN")
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
