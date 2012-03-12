@@ -108,25 +108,31 @@ class TopicManager(object):
         topics = {}
 
         # TODO(ewindisch): static is ugly:
-        # have a better way of determining topics?
-        # topic_flags is a list of flags to search for topic names.
-        topic_flags = [
-            'compute_topic',
-            'console_topic',
-            'scheduler_topic',
-            'volume_topic',
-            'network_topic',
-            'vsa_topic',
-            'cert_topic',
-        ]
+        # consider putting all incoming requests into the zmq-receiver
+        # instead?
+
+        # topic_flags contains all flags and their modules.
+        topic_flags = {
+            'compute_topic': 'nova.flags',
+            'console_topic': 'nova.flags',
+            'scheduler_topic': 'nova.flags',
+            'volume_topic': 'nova.flags',
+            'network_topic': 'nova.flags',
+            'vsa_topic': 'nova.flags',
+            'cert_topic': 'nova.flags',
+            'consoleauth_topic': 'nova.consoleauth'
+        }
         # Static list of topics
         # 'test' - used by test suite
         # 'nested' - used by test sutie
-        topics_static = ['test', 'nested', 'zmq_replies']
+        expected_topics = ['test', 'nested', 'zmq_replies']
+
+        for topic, module in topic_flags.items():
+        	flags.DECLARE(topic, module)
 
         # Concat dynamic and static topic lists
-        expected_topics = map(lambda x: getattr(FLAGS, x), topic_flags) + \
-                              topics_static
+        expected_topics.extend(map(lambda x: getattr(FLAGS, x),
+                               topic_flags.keys()))
 
         for i, topic in enumerate(expected_topics):
             topics[topic] = i
