@@ -160,16 +160,12 @@ class TopicManager(object):
     @classmethod
     def port(self, topic, socket_type):
         """ Returns port for a given topic """
-        tsplit = topic.split(".", 3)
+        tsplit = topic.split(".", 1)
         base_topic = tsplit[0]
-
-        padding = 0
-        if len(tsplit) == 3:
-            padding = int(tsplit[2])
 
         port_offset = self.topics()[base_topic] + \
             len(self.topics()) * (socket_type + 1)
-        return FLAGS.rpc_zmq_start_port + port_offset + padding
+        return FLAGS.rpc_zmq_start_port + port_offset
 
     @classmethod
     def addr(self, topic, socket_type):
@@ -709,8 +705,10 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
 
     socket_type = socket_type or TopicManager.PUSH
 
-    if topic.endswith(".None") or topic.endswith("."):
-        topic = topic.split(".")[0]
+    if topic.endswith(".None")
+        topic = topic.rsplit(".", 1)[0]
+    if topic.endswith("."):
+        topic = topic.rsplit(".", 1)[0]
 
     if not matchmaker:
         constructor = globals()[FLAGS.rpc_zmq_matchmaker]
