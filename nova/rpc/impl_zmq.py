@@ -234,12 +234,12 @@ class MatchMakerRing(MatchMakerBase):
         self.ring = json.load(fh)
         self.ring0 = {}
         for k in self.ring.keys():
-            self.ring0 = itertools.cycle(self.ring[k])
+            self.ring0[k] = itertools.cycle(self.ring[k])
         fh.close()
         LOG.debug(_("RING:\n%s"), self.ring0)
 
     def get_addr_args(self, context, topic):
-        host = next(self.ring0)
+        host = next(self.ring0[topic])
         return (topic + '.' + host, TopicManager.PUSH)
 
 
