@@ -715,6 +715,8 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
         matchmaker = constructor()
     addresses = matchmaker.get_workers(context, socket_type, topic)
 
+    LOG.debug(_("Sending message(s) to: %s") % addresses)
+
     # This supports brokerless fanout (addresses > 1)
     for addr in addresses:
         if style == "cast":
