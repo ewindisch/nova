@@ -644,7 +644,7 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
-    hostname = socket.gethostname()
+    hostname = FLAGS.host
     base_topic = topic.split('.', 1)[0]
 
     # Replies always come into the reply service.
