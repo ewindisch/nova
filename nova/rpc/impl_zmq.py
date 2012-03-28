@@ -173,7 +173,7 @@ class TopicManager(object):
 
         tsplit = topic.split(".", 1)
         base_topic = tsplit[0]
-        if 1 in tsplit:
+        if len(tsplit) == 2:
             host = tsplit[1]
         else:
             host = FLAGS.rpc_zmq_broker_ip
