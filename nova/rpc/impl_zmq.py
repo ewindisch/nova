@@ -705,7 +705,7 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
 
     socket_type = socket_type or TopicManager.PUSH
 
-    if topic.endswith(".None")
+    if topic.endswith(".None"):
         topic = topic.rsplit(".", 1)[0]
     if topic.endswith("."):
         topic = topic.rsplit(".", 1)[0]
