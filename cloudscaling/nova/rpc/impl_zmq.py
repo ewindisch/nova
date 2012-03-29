@@ -118,7 +118,7 @@ class TopicManager(object):
             'scheduler_topic': 'nova.flags',
             'volume_topic': 'nova.flags',
             'network_topic': 'nova.flags',
-            'vsa_topic': 'nova.flags',
+            #'vsa_topic': 'nova.flags',
             'cert_topic': 'nova.flags',
             'consoleauth_topic': 'nova.consoleauth'
         }
