@@ -52,3 +52,8 @@ to process (as a reply).
 
 This pure PUSH/PULL pattern is more robust with less complexity compared to the
 (X)REQ/(X)REP patterns.
+
+Authors
+-------
+A full list of authors that have left their mark on this software is
+included in a file called AUTHORS.
