@@ -14,7 +14,7 @@ setup(
     license = "Apache 2.0",
     keywords = "OpenStack Nova RPC ZeroMQ driver",
     url = "TODO",
-    packages = find_packages(),
+    packages = find_packages(exclude=['bin']),
     zip_safe=False,
     install_requires=['nova'],
     long_description=read('README.md'),
