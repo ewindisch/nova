@@ -22,4 +22,6 @@ setup(
         "Environment :: Plugins",
         "License :: OSI Approved :: Apache Software License",
         ],
+    scripts=['bin/nova-rpc-zmq',
+             'bin/nova-rpc-zmq-receiver']
 )
