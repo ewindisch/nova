@@ -9,7 +9,7 @@ Installation:
 Run:
  python setup.py install
 
-Set --rpc_backend=nova.rpc.impl_zmq
+Set --rpc_backend=cloudscaling.nova.rpc.impl_zmq
 
 Configuration:
 --------------

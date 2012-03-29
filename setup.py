@@ -6,7 +6,7 @@ def read(fname):
     return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 setup(
-    name = "nova.rpc.impl_zmq",
+    name = "cloudscaling.nova.rpc.impl_zmq",
     version = "1.0",
     author = "Eric Windisch",
     author_email = "eric@cloudscaling.com",
