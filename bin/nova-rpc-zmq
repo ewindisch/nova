@@ -31,7 +31,7 @@ from nova import flags
 from nova import log as logging
 from nova import utils
 
-from nova.rpc import impl_zmq
+from cloudscaling.nova.rpc import impl_zmq
 
 # If ../nova/__init__.py exists, add ../ to Python search path, so that
 # it will override what happens to be installed in /usr/(local/)lib/python...
