@@ -238,7 +238,18 @@ class MatchMakerRing(MatchMakerBase):
         fh.close()
         LOG.debug(_("RING:\n%s"), self.ring0)
 
+        for key in TopicManager.topics().keys():
+        	if not key in self.ring:
+        		LOG.warning(_("MatchMaker ringfile does not define topic:"
+        		              "%s") % key)
+
     def get_addr_args(self, context, topic):
+        if topic not in self.ring0:
+        	LOG.debug(
+        	    _("No key defining hosts for topic '%(topic)', "
+                  "see ringfile") % topic)
+            )
+            return []
         host = next(self.ring0[topic])
         return (topic + '.' + host, TopicManager.PUSH)
 
