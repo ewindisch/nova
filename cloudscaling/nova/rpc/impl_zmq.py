@@ -55,7 +55,7 @@ zmq_opts = [
         help='Host providing brokerage service.'),
 
     # The module to use for matchmaking.
-    cfg.StrOpt('rpc_zmq_matchmaker', default='MatchMakerBroker',
+    cfg.StrOpt('rpc_zmq_matchmaker', default='MatchMakerFanoutRing',
         help='Match maker module.'),
 
     # Matchmaker ring file
@@ -205,7 +205,11 @@ class MatchMakerBase(object):
 
 
 class MatchMakerTopicScheduler(MatchMakerBase):
-    """Match Maker where a get_worker request is routed."""
+    """
+       Match Maker where a get_worker request is routed/brokered.
+       This effectively acts as a brokered scheduler to
+       facilitate peer2peer communicatons.
+    """
     def __init__(self):
         pass
 
@@ -219,7 +223,7 @@ class MatchMakerTopicScheduler(MatchMakerBase):
 
 
 class MatchMakerBroker(MatchMakerBase):
-    """Match Maker where all bare topics are routed"""
+    """Match Maker where all bare topics are routed/brokered"""
     def __init__(self):
         pass
 
@@ -228,7 +232,10 @@ class MatchMakerBroker(MatchMakerBase):
 
 
 class MatchMakerRing(MatchMakerBase):
-    """Match Maker where hosts are loaded from a static file"""
+    """
+        Match Maker where hosts are loaded from a static file
+        Fanout messages are brokered, all others are peer-to-peer.
+    """
     def __init__(self):
         fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
         self.ring = json.load(fh)
@@ -257,7 +264,7 @@ class MatchMakerRing(MatchMakerBase):
 class MatchMakerFanoutRing(MatchMakerRing):
     """
        Match Maker where hosts are loaded from a static file
-       - with support for brokerless fanout
+       All messages are peer2peer, including fanout.
     """
     def get_workers(self, context, sock_type, topic):
         # Get a host on bare topics.
