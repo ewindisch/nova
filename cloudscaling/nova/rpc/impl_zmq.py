@@ -254,7 +254,7 @@ class MatchMakerRing(MatchMakerBase):
         if topic not in self.ring0:
             LOG.debug(
                 _("No key defining hosts for topic '%(topic)', "
-                  "see ringfile") % topic)
+                  "see ringfile") % topic
             )
             return []
         host = next(self.ring0[topic])
