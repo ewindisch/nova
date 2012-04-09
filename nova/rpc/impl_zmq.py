@@ -56,12 +56,12 @@ zmq_opts = [
 
     # The module to use for matchmaking.
     cfg.StrOpt('rpc_zmq_matchmaker', default='MatchMakerFanoutRing',
-        help='Match maker module.'),
+        help='MatchMaker driver'),
 
     # Matchmaker ring file
     cfg.StrOpt('rpc_zmq_matchmaker_ringfile',
-        default='/etc/nova/zmq_matchmaker_ring',
-        help='Host providing match making service.'),
+        default='/etc/nova/matchmaker_ring.json',
+        help='Matchmaker ring file (JSON)'),
 
     cfg.IntOpt('rpc_zmq_start_port', default=9500,
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
