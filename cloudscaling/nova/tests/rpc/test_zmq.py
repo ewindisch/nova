@@ -95,6 +95,7 @@ class RpcZmqBaseTopicTestCase(_RpcZmqBaseTestCase):
         if impl_zmq:
             super(_RpcZmqBaseTestCase, self).setUp()
 
+
 class RpcZmqDirectTopicTestCase(_RpcZmqBaseTestCase):
     def setUp(self):
         self.rpc = impl_zmq

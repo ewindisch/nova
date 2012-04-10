@@ -391,7 +391,7 @@ class InternalContext(object):
             if 'args' in data:
                 result = func(ctx, **data['args'])
             else:
-            	result = func(ctx)
+                result = func(ctx)
             return ConsumerBase.normalize_reply(result, ctx.replies)
         except GreenletExit:
             # ignore these since they are just from shutdowns
