@@ -15,18 +15,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-"""Handles all processes relating to instances (guest vms).
+"""Handles all database calls
 
 The :py:class:`DatabaseManager` class is a :py:class:`nova.manager.Manager` that
-handles RPC calls relating to creating instances.  It is responsible for
-building a disk image, launching it via the underlying virtualization driver,
-responding to calls to check its state, attaching persistent storage, and
-terminating it.
+handles RPC calls relating to database operations.
 
 **Related Flags**
 
-:instances_path:  Where instances are kept on disk
-:database_driver:  Name of class that is used to handle virtualization, loaded
+:database_driver:  Name of class that is used to handle databases, loaded
                   by :func:`nova.utils.import_object`
 
 """
@@ -84,9 +80,16 @@ class DatabaseManager(manager.Manager):
 
 
     def init_host(self):
-        """Handle initialization if this is a standalone service.
-
-        Child classes should override this method.
-
-        """
         pass
+
+    def _call(self, name):
+        # Curry method into the rpc call, only accept args to def
+        def rpccall(args):
+            rpc.call(self.context, self.topic, {
+                "method": name,
+                "args": args
+            })
+        return rpccall
+
+    def __getattr__(self, name):
+        return self._call(name)
