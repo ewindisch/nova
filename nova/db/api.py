@@ -70,8 +70,7 @@ db_opts = [
 FLAGS = flags.FLAGS
 FLAGS.register_opts(db_opts)
 
-IMPL = utils.LazyPluggable('db_backend',
-                           sqlalchemy='nova.db.sqlalchemy.api')
+IMPL = utils.import_object(FLAGS.db_backend)
 
 
 class NoMoreNetworks(exception.NovaException):
