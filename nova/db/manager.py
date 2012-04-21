@@ -72,7 +72,7 @@ class DatabaseManager(manager.Manager):
                                         utils.import_object(database_driver),
                                         driver.DatabaseDriver)
         except ImportError as e:
-            LOG.error(_("Unable to load the virtualization driver: %s") % (e))
+            LOG.error(_("Unable to load the database driver: %s") % (e))
             sys.exit(1)
 
         super(DatabaseManager, self).__init__(service_name="database",
