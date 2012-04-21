@@ -19,8 +19,6 @@
 
 """Defines interface for DB access.
 
-The underlying driver is loaded as a :class:`LazyPluggable`.
-
 Functions in this module are imported into the nova.db namespace. Call these
 functions from nova.db namespace, not the nova.db.api namespace.
 
@@ -32,8 +30,10 @@ these objects be simple dictionaries.
 
 **Related Flags**
 
-:db_backend:  string to lookup in the list of LazyPluggable backends.
-              `sqlalchemy` is the only supported backend right now.
+:db_backend:  class used to provide a pluggable backend.
+              supported backends are:
+              - `sqlalchemy`: Note that this is a leaky abstraction
+              - `rpc`: Passes requests via RPC to a nova service.
 
 :sql_connection:  string specifying the sqlalchemy connection to use, like:
                   `sqlite:///var/lib/nova/nova.sqlite`.
