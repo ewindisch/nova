@@ -62,6 +62,8 @@ class DatabaseManager(manager.Manager):
     """Manages the running instances from creation to destruction."""
 
     def __init__(self, database_driver=None, *args, **kwargs):
+        self.context = nova.context.get_admin_context()
+
         # NOTE(ewindisch): borrowed import code from compute
         # TODO(vish): sync driver creation logic with the rest of the system
         #             and re-document the module docstring
