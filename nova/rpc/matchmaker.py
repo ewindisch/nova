@@ -33,7 +33,6 @@ import types
 import traceback
 import uuid
 
-from eventlet.green import zmq
 from eventlet.timeout import Timeout
 
 from nova import context
@@ -44,88 +43,94 @@ from nova import flags
 from nova import utils
 
 
+zmq_opts = [
+    # Matchmaker ring file
+    cfg.StrOpt('rpc_zmq_matchmaker_ringfile',
+        default='/etc/nova/matchmaker_ring.json',
+        help='Matchmaker ring file (JSON)'),
+]
+
 FLAGS = flags.FLAGS
-flags.DECLARE('nova.rpc.impl_zmq', 'rpc_zmq_matchmaker')
-flags.DECLARE('nova.rpc.impl_zmq', 'rpc_zmq_matchmaker_ringfile')
+FLAGS.register_opts(zmq_opts)
+
+
+class RewriteRule(object):
+    """ 
+    Implements lookups. 
+    Subclass this to support hashtables, dns, etc.
+    """
+    def __init__(self):
+        pass
+
+    def run(self, context, topic):
+        raise NotImplementedError()
+
+
+class RewriteCond(object):
+    """
+    A condition on which to perform a lookup.
+    """
+    def __init__(self, rule):
+        self.rule = rule
+        pass
+
+    def _test(self, context, topic):
+        raise NotImplementedError()
+
+    def run_cond(self, context, topic):
+        if self._test(context, topic):
+        	return True
+        return False
+    
+    def run_rule(self, context, topic):
+        return self.rule.run(context, topic)
 
 
 class MatchMakerBase(object):
     """Match Maker Base Class"""
 
-    class RewriteRule(object):
-        def __init__(self):
-            pass
-
-        def eval(self, context, topic):
-            raise NotImplementedError()
-
-    class RewriteCond(object):
-        def __init__(self, rule):
-            self.rule = rule
-            pass
-
-        def _test(self, context, sock_type, topic):
-            raise NotImplementedError()
-
-        def eval(self):
-            if test():
-                self.rule.eval()
-
-    # Get a host on bare topics.
-    # Not needed for ROUTER_PUB which is always brokered.
-    class ConditionBareTopic(RewriteCond):
-        def _test(self, context, sock_type, topic):
-            if '.' not in topic and sock_type != TopicManager.ROUTER_PUSH \
-                                and sock_type != TopicManager.ROUTER_PUB:
-                return True
-            return False
-
     def __init__(self):
+        # Array of tuples. Index [1] toggles negation
         self.conditions = []
 
-    def _add_condition(self, condition):
-        self.conditions.append(condition)
+    def add_condition(self, condition):
+        self.conditions.append((condition, False))
+
+    def add_negate_condition(self, condition):
+        self.conditions.append((condition, True))
 
     def _rewrite_topic(self, context, topic):
         """Rewrites the topic"""
         raise NotImplementedError()
 
-    def get_workers(self, context, sock_type, topic):
-        for condition in self.conditions:
-        	condition.exec(context, sock_type, topic)
+    def get_workers(self, context, topic):
+        workers = []
+        for (condition, bit) in self.conditions:
+        	x = condition.run_cond(context, topic)
+        	if (bit and not x) or x:
+        		workers.append(condition.run_rule(context, topic))
+        return workers
 
 
-class MatchMakerTopicScheduler(MatchMakerBase):
-    """
-       Match Maker where a get_worker request is routed/brokered.
-       This effectively acts as a brokered scheduler to
-       facilitate peer2peer communicatons.
-    """
-    def __init__(self):
-        pass
-
-    def rewrite_topic(self, context, topic):
-        host = _multi_send("call", context,
-            "%s" % (topic),
-            {'method': '-get_worker', 'args': {}},
-            timeout=5, sock_type=TopicManager.ROUTER_PUSH)[2][0]
-        topic = topic + "." + host
-        return (topic, TopicManager.PUSH)
+# Get a host on bare topics.
+# Not needed for ROUTER_PUB which is always brokered.
+class RulePass(RewriteRule):
+    def run(self, context, topic):
+        return (context, topic)
 
 
-class MatchMakerBroker(MatchMakerBase):
-    """Match Maker where all bare topics are routed/brokered"""
-    def __init__(self):
-        pass
-
-    def rewrite_topic(self, context, topic):
-        return (topic, TopicManager.ROUTER_PUSH)
+# Get a host on bare topics.
+# Not needed for ROUTER_PUB which is always brokered.
+class ConditionBareTopic(RewriteCond):
+    def _test(self, context, topic):
+        if '.' not in topic:
+            return True
+        return False
 
 
 class MatchMakerRing(MatchMakerBase):
     """
         Match Maker where hosts are loaded from a static file
-        Fanout messages are brokered, all others are peer-to-peer.
     """
     def __init__(self):
         fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
@@ -141,29 +146,22 @@ class MatchMakerRing(MatchMakerBase):
                 LOG.warning(_("MatchMaker ringfile does not define topic:"
                             "%s") % key)
 
-    def rewrite_topic(self, context, topic):
-        if topic not in self.ring0:
-            LOG.debug(
-                _("No key defining hosts for topic '%(topic)', "
-                  "see ringfile") % topic
-            )
-            return []
-        host = next(self.ring0[topic])
-        return (topic + '.' + host, TopicManager.PUSH)
+        # round-robin
+        self.add_condition(ConditionBareTopic(NextTopicRule()))
+        # fanout messaging
+        self.add_condition(ConditionBareTopic(AllTopicRule()))
 
-
-class MatchMakerFanoutRing(MatchMakerRing):
-    """
-       Match Maker where hosts are loaded from a static file
-       All messages are peer2peer, including fanout.
-    """
-    def rewrite_cond(self, context, sock_type, topic):
-        # Get a host on bare topics.
-        # Not needed for ROUTER_PUB which is always brokered.
-        if '.' not in topic and sock_type != TopicManager.ROUTER_PUSH:
-            (topic, sock_type) = self.rewrite_topic(context, topic)
-        elif sock_type == TopicManager.ROUTER_PUB:
-            sock_type = TopicManager.PUSH
-            return map(lambda h: TopicManager.addr(topic + '.' + h, sock_type),
-                       self.ring0[topic])
-        return [TopicManager.addr(topic, sock_type)]
+    def NextTopicRule(RewriteRule):
+        def run(self, context, topic):
+            if topic not in self.ring0:
+                LOG.debug(
+                    _("No key defining hosts for topic '%(topic)', "
+                      "see ringfile") % topic
+                )
+                return []
+            host = next(self.ring0[topic])
+            return (topic + '.' + host, TopicManager.PUSH)
+        
+    class AllTopicRule(RewriteRule):
+        def run(self, context, topic):
+            return ring0[topic]
