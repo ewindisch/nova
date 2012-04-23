@@ -35,12 +35,15 @@ from nova import test
 LOG = logging.getLogger(__name__)
 
 
-class BaseRpcTestCase(test.TestCase):
-    def setUp(self, supports_timeouts=True):
-        super(BaseRpcTestCase, self).setUp()
+class _BaseRpcTestCase(test.TestCase):
+    def setUp(self, supports_timeouts=True, topic=None,
+              topic_nested=None):
+        super(_BaseRpcTestCase, self).setUp()
+        self.topic = topic or 'test'
+        self.topic_nested = topic_nested or 'nested'
         self.conn = self.rpc.create_connection(True)
         self.receiver = TestReceiver()
-        self.conn.create_consumer('test', self.receiver, False)
+        self.conn.create_consumer(self.topic, self.receiver, False)
         self.conn.consume_in_thread()
         self.context = context.get_admin_context()
         self.supports_timeouts = supports_timeouts
@@ -51,13 +54,13 @@ class BaseRpcTestCase(test.TestCase):
 
     def test_call_succeed(self):
         value = 42
-        result = self.rpc.call(self.context, 'test', {"method": "echo",
+        result = self.rpc.call(self.context, self.topic, {"method": "echo",
                                                  "args": {"value": value}})
         self.assertEqual(value, result)
 
     def test_call_succeed_despite_multiple_returns_yield(self):
         value = 42
-        result = self.rpc.call(self.context, 'test',
+        result = self.rpc.call(self.context, self.topic,
                           {"method": "echo_three_times_yield",
                            "args": {"value": value}})
         self.assertEqual(value + 2, result)
@@ -65,7 +68,7 @@ class BaseRpcTestCase(test.TestCase):
     def test_multicall_succeed_once(self):
         value = 42
         result = self.rpc.multicall(self.context,
-                              'test',
+                              self.topic,
                               {"method": "echo",
                                "args": {"value": value}})
         for i, x in enumerate(result):
@@ -76,7 +79,7 @@ class BaseRpcTestCase(test.TestCase):
     def test_multicall_three_nones(self):
         value = 42
         result = self.rpc.multicall(self.context,
-                              'test',
+                              self.topic,
                               {"method": "multicall_three_nones",
                                "args": {"value": value}})
         for i, x in enumerate(result):
@@ -87,7 +90,7 @@ class BaseRpcTestCase(test.TestCase):
     def test_multicall_succeed_three_times_yield(self):
         value = 42
         result = self.rpc.multicall(self.context,
-                              'test',
+                              self.topic,
                               {"method": "echo_three_times_yield",
                                "args": {"value": value}})
         for i, x in enumerate(result):
@@ -97,7 +100,7 @@ class BaseRpcTestCase(test.TestCase):
         """Makes sure a context is passed through rpc call."""
         value = 42
         result = self.rpc.call(self.context,
-                          'test', {"method": "context",
+                          self.topic, {"method": "context",
                                    "args": {"value": value}})
         self.assertEqual(self.context.to_dict(), result)
 
@@ -121,12 +124,12 @@ class BaseRpcTestCase(test.TestCase):
 
         nested = Nested()
         conn = self.rpc.create_connection(True)
-        conn.create_consumer('nested', nested, False)
+        conn.create_consumer(self.topic_nested, nested, False)
         conn.consume_in_thread()
         value = 42
         result = self.rpc.call(self.context,
-                          'nested', {"method": "echo",
-                                     "args": {"queue": "test",
+                          self.topic_nested, {"method": "echo",
+                                     "args": {"queue": self.topic,
                                               "value": value}})
         conn.close()
         self.assertEqual(value, result)
@@ -140,12 +143,12 @@ class BaseRpcTestCase(test.TestCase):
         self.assertRaises(rpc_common.Timeout,
                           self.rpc.call,
                           self.context,
-                          'test',
+                          self.topic,
                           {"method": "block",
                            "args": {"value": value}}, timeout=1)
         try:
             self.rpc.call(self.context,
-                     'test',
+                     self.topic,
                      {"method": "block",
                       "args": {"value": value}},
                      timeout=1)
