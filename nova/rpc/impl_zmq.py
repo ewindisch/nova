@@ -56,7 +56,7 @@ zmq_opts = [
         help='Host providing brokerage service.'),
 
     # The module to use for matchmaking.
-    cfg.StrOpt('rpc_zmq_matchmaker', default='MatchMakerFanoutRing',
+    cfg.StrOpt('rpc_zmq_matchmaker', default='nova.rpc.matchmaker.MatchMakerFanoutRing',
         help='MatchMaker driver'),
 
     # Matchmaker ring file
