@@ -70,45 +70,37 @@ class RewriteCond(object):
     """
     A condition on which to perform a lookup.
     """
-    def __init__(self, rule):
-        self.rule = rule
+    def __init__(self):
         pass
 
     def _test(self, context, topic):
         raise NotImplementedError()
 
-    def run_cond(self, context, topic):
+    def run(self, context, topic):
         if self._test(context, topic):
         	return True
         return False
     
-    def run_rule(self, context, topic):
-        return self.rule.run(context, topic)
-
 
 class MatchMakerBase(object):
     """Match Maker Base Class"""
 
     def __init__(self):
-        # Array of tuples. Index [1] toggles negation
+        # Array of tuples. Index [2] toggles negation
         self.conditions = []
 
-    def add_condition(self, condition):
-        self.conditions.append((condition, False))
+    def add_condition(self, condition, rule):
+        self.conditions.append((condition, rule, False))
 
-    def add_negate_condition(self, condition):
-        self.conditions.append((condition, True))
-
-    def _rewrite_topic(self, context, topic):
-        """Rewrites the topic"""
-        raise NotImplementedError()
+    def add_negate_condition(self, condition, rule):
+        self.conditions.append((condition, rule, True))
 
     def get_workers(self, context, topic):
         workers = []
-        for (condition, bit) in self.conditions:
-        	x = condition.run_cond(context, topic)
+        for (condition, rule, bit) in self.conditions:
+        	x = condition.run(context, topic)
         	if (bit and not x) or x:
-        		workers.append(condition.run_rule(context, topic))
+        		workers.append(rule.run(context, topic))
         return workers
 
 
@@ -147,9 +139,9 @@ class MatchMakerRing(MatchMakerBase):
                             "%s") % key)
 
         # round-robin
-        self.add_condition(ConditionBareTopic(NextTopicRule()))
+        self.add_condition(ConditionBareTopic(), NextTopicRule())
         # fanout messaging
-        self.add_condition(ConditionBareTopic(AllTopicRule()))
+        self.add_condition(ConditionBareTopic(), AllTopicRule())
 
     def NextTopicRule(RewriteRule):
         def run(self, context, topic):
