@@ -78,18 +78,22 @@ matchmaker = None
 
 class TopicManager(object):
     """ TopicManager helps us manage our topics """
+    # Requests and replies work the same way,
+    # but they are useful to separate for network ACL purposes.
+
+    # Requests == in
+    REQUESTS = 0
+    # Replies == in (but replies, obviously)
+    REPLIES = 1
+    # Out
+    FORWARD = 2
+
     ROUTER_PUSH = 0  # Input for central broker RR queue  (send to this)
     ROUTER_PULL = 1  # Output for central broker RR queue (pull from this)
     ROUTER_PUB = 2  # Input for Router P/S
     ROUTER_SUB = 3  # Output for Router P/S
-    # For Multicast pubsub
-    PUBSUB = 4
     # Distributed cast
     PUSH = 5
-
-    # Useful for debugging
-    socket_names = ['ROUTER_PUSH', 'ROUTER_PULL', 'ROUTER_PUB',
-        'ROUTER_SUB', 'PUBSUB', 'PUSH']
 
     _topics = None
 
@@ -110,8 +114,6 @@ class TopicManager(object):
 
         # TODO(ewindisch): static is ugly:
         # consider putting all incoming requests into the zmq-receiver
-        # instead?
-
         # topic_flags contains all flags and their modules.
         topic_flags = {
             'compute_topic': 'nova.flags',
@@ -135,28 +137,13 @@ class TopicManager(object):
         expected_topics.extend(map(lambda x: getattr(FLAGS, x),
                                topic_flags.keys()))
 
+        # Assign each topic a number
         for i, topic in enumerate(expected_topics):
             topics[topic] = i
 
         # memoize
         TopicManager._topics = topics
         return topics
-
-    @classmethod
-    def topic_from_port(self, port):
-        """ Returns address for ip/topic """
-        topics = self.topics()
-        x = (port - FLAGS.rpc_zmq_start_port) % len(topics)
-        for k, v in topics.iteritems():
-            if v == x:
-                return k
-
-    @classmethod
-    def socket_type_from_port(self, port):
-        """ Returns address for ip/topic """
-        topics = self.topics()
-        return self.socket_names[(port - FLAGS.rpc_zmq_start_port) / \
-            (topics[self.topic_from_port(port)] + len(topics)) - 1]
 
     @classmethod
     def port(self, topic, socket_type):
@@ -490,46 +477,17 @@ class Connection(object):
 
             self.reactor.register(proxy,
                                   in_addr, zmq.PULL, out_addr, zmq.PUB)
-        elif isbroker and fanout:
-            LOG.debug(_("Create Consumer FO-Router for (%(topic)s)") %
-                {'topic': topic})
-            in_addr = TopicManager.listen_addr(topic, TopicManager.ROUTER_SUB)
-            out_addr = TopicManager.listen_addr(topic, TopicManager.ROUTER_PUB)
+            return 0
 
-            self.reactor.register(
-                proxy, in_addr, zmq.PULL, out_addr, zmq.PUB)
-        elif isbroker:
-            LOG.debug(_("Create Consumer PUSH/PULL-Pair for (%(topic)s)") %
-                {'topic': topic})
-            in_addr = TopicManager.listen_addr(topic,
-                TopicManager.ROUTER_PUSH)
-            out_addr = TopicManager.listen_addr(topic,
-                TopicManager.ROUTER_PULL)
-
-            self.reactor.register(proxy,
-                                  in_addr, zmq.PULL, out_addr,
-                                  zmq.PUSH)
-        elif fanout:
-            LOG.debug(_("Create Consumer FO for topic (%(topic)s)") %
-                {'topic': topic})
-
-            # PubSub
-            in_addr = TopicManager.addr(topic, TopicManager.ROUTER_SUB)
-            self.reactor.register(proxy, in_addr, zmq.SUB, subscribe='',
-                                  in_bind=False)
-        elif '.' in topic:
+        if '.' not in topic:
             LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
                 {'topic': topic})
 
             inaddr = TopicManager.listen_addr(topic, TopicManager.PUSH)
             self.reactor.register(proxy, inaddr, zmq.PULL)
-        else:
-            # Connect to broker.
-            # Depending on the matchmaker, requests may not come in this
-            # way, but we support it anyway.
+            return 0
 
-            inaddr = TopicManager.addr(topic, TopicManager.ROUTER_PULL)
-            self.reactor.register(proxy, inaddr, zmq.PULL, in_bind=False)
+        LOG.DEBUG(_("How did this happen?"))
 
     def close(self):
         self.reactor.close()
