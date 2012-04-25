@@ -182,8 +182,11 @@ class QueueSocket(object):
             self.sock.connect(addr)
 
     def close(self):
+        # We must unsubscribe, or we'll leak descriptors.
         if self.subscribe:
             self.sock.setsockopt(zmq.UNSUBSCRIBE, self.subscribe)
+
+        # Linger -1 prevents lost/dropped messages
         if not self.sock.closed:
             self.sock.close(linger=-1)
         self.sock = None
@@ -562,6 +565,8 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     # We memoize matchmaker through this global
     global matchmaker
 
+    # Strip/clean the topics.
+    # Should these go into the matchmaker too?
     if topic.endswith(".None"):
         topic = topic.rsplit(".", 1)[0]
     if topic.endswith("."):
