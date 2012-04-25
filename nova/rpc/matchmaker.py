@@ -90,7 +90,6 @@ class MatchMakerBase(object):
         self.conditions = []
 
     def add_condition(self, condition, rule, last=False):
-        if 
         self.conditions.append((condition, rule, False, last))
 
     def add_negate_condition(self, condition, rule, last=False):
@@ -107,8 +106,7 @@ class MatchMakerBase(object):
         		return workers[0:limit]
         return workers
 
-    def get_workers(self, context, topic, limit=1):
-
+    #def get_workers(self, context, topic, limit=1):
 
 
 # Get a host on bare topics.
