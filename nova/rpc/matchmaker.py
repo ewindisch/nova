@@ -89,19 +89,26 @@ class MatchMakerBase(object):
         # Array of tuples. Index [2] toggles negation
         self.conditions = []
 
-    def add_condition(self, condition, rule):
-        self.conditions.append((condition, rule, False))
+    def add_condition(self, condition, rule, last=False):
+        if 
+        self.conditions.append((condition, rule, False, last))
 
-    def add_negate_condition(self, condition, rule):
-        self.conditions.append((condition, rule, True))
+    def add_negate_condition(self, condition, rule, last=False):
+        self.conditions.append((condition, rule, True, last))
 
-    def get_workers(self, context, topic):
+    def get_worker(self, context, topic):
         workers = []
-        for (condition, rule, bit) in self.conditions:
+        for (condition, rule, bit, last) in self.conditions:
         	x = condition.run(context, topic)
         	if (bit and not x) or x:
-        		workers.append(rule.run(context, topic))
+        		workers.extend(rule.run(context, topic))
+
+        	if len(workers) >= limit:
+        		return workers[0:limit]
         return workers
+
+    def get_workers(self, context, topic, limit=1):
+
 
 
 # Get a host on bare topics.
@@ -120,11 +127,13 @@ class ConditionBareTopic(RewriteCond):
         return False
 
 
-class MatchMakerRing(MatchMakerBase):
+class RingRule(RewriteRule):
     """
-        Match Maker where hosts are loaded from a static file
+    Match Maker where hosts are loaded from a static file
     """
     def __init__(self):
+        super(RingRule, self).__init__()
+
         fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
         self.ring = json.load(fh)
         self.ring0 = {}
@@ -133,27 +142,53 @@ class MatchMakerRing(MatchMakerBase):
         fh.close()
         LOG.debug(_("RING:\n%s"), self.ring0)
 
-        for key in TopicManager.topics().keys():
-            if not key in self.ring:
-                LOG.warning(_("MatchMaker ringfile does not define topic:"
-                            "%s") % key)
+
+class NextTopicRule(RingRule):
+    def __init__(self):
+        super(NextTopicRule, self).__init__()
+
+    def run(self, context, topic):
+        if topic not in self.ring0:
+            LOG.debug(
+                _("No key defining hosts for topic '%(topic)', "
+                  "see ringfile") % topic
+            )
+            return []
+        host = next(self.ring0[topic])
+        return [topic + '.' + host]
+
+
+class AllTopicRule(RingRule):
+    def __init__(self):
+        super(AllTopicRule, self).__init__()
+
+    def run(self, context, topic):
+        return map(lambda x: (topic + '.' + x), self.ring[topic])
+
+
+class MatchMakerRing(MatchMakerBase):
+    """
+        Match Maker where hosts are loaded from a static file
+    """
+    def __init__(self):
+        super(MatchMakerRing, self).__init__() #*args, **kwargs)
 
         # round-robin
-        self.add_condition(ConditionBareTopic(), NextTopicRule())
+        self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
         # fanout messaging
-        self.add_condition(ConditionBareTopic(), AllTopicRule())
+        self.add_condition(
+            [ConditionBareTopic(), ConditionFanout()],
+            AllTopicRule()
+        )
 
-    def NextTopicRule(RewriteRule):
-        def run(self, context, topic):
-            if topic not in self.ring0:
-                LOG.debug(
-                    _("No key defining hosts for topic '%(topic)', "
-                      "see ringfile") % topic
-                )
-                return []
-            host = next(self.ring0[topic])
-            return (topic + '.' + host, TopicManager.PUSH)
-        
-    class AllTopicRule(RewriteRule):
-        def run(self, context, topic):
-            return ring0[topic]
+        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
+        self.ring = json.load(fh)
+        self.ring0 = {}
+        for k in self.ring.keys():
+            self.ring0[k] = itertools.cycle(self.ring[k])
+        fh.close()
+        LOG.debug(_("RING:\n%s"), self.ring0)
+
+#    def get_workers(self, context, topic):
+#        if '.' not in topic:
+#        	return self.ring0[topic].next()

@@ -51,10 +51,6 @@ zmq_opts = [
     cfg.StrOpt('rpc_zmq_bind_address', default='*',
         help='ZeroMQ bind address'),
 
-    # The IP of the machine acting as a central broker.
-    cfg.StrOpt('rpc_zmq_broker_ip', default='127.0.0.1',
-        help='Host providing brokerage service.'),
-
     # The module to use for matchmaking.
     cfg.StrOpt('rpc_zmq_matchmaker', default='nova.rpc.matchmaker.MatchMakerFanoutRing',
         help='MatchMaker driver'),
@@ -101,51 +97,6 @@ class TopicManager(object):
         pass
 
     @classmethod
-    def topics(self):
-        '''
-        Get the names of all nova topics.
-        '''
-
-        # If memoized...
-        if TopicManager._topics:
-            return TopicManager._topics
-
-        topics = {}
-
-        # TODO(ewindisch): static is ugly:
-        # consider putting all incoming requests into the zmq-receiver
-        # topic_flags contains all flags and their modules.
-        topic_flags = {
-            'compute_topic': 'nova.flags',
-            'console_topic': 'nova.flags',
-            'scheduler_topic': 'nova.flags',
-            'volume_topic': 'nova.flags',
-            'network_topic': 'nova.flags',
-            #'vsa_topic': 'nova.flags',
-            'cert_topic': 'nova.flags',
-            'consoleauth_topic': 'nova.consoleauth'
-        }
-        # Static list of topics
-        # 'test' - used by test suite
-        # 'nested' - used by test sutie
-        expected_topics = ['test', 'nested', 'zmq_replies']
-
-        for topic, module in topic_flags.items():
-            flags.DECLARE(topic, module)
-
-        # Concat dynamic and static topic lists
-        expected_topics.extend(map(lambda x: getattr(FLAGS, x),
-                               topic_flags.keys()))
-
-        # Assign each topic a number
-        for i, topic in enumerate(expected_topics):
-            topics[topic] = i
-
-        # memoize
-        TopicManager._topics = topics
-        return topics
-
-    @classmethod
     def port(self, topic, socket_type):
         """ Returns port for a given topic """
         tsplit = topic.split(".", 1)
@@ -163,8 +114,6 @@ class TopicManager(object):
         base_topic = tsplit[0]
         if len(tsplit) == 2:
             host = tsplit[1]
-        else:
-            host = FLAGS.rpc_zmq_broker_ip
 
         port = self.port(topic, socket_type)
         return "tcp://%s:%s" % (host, port)
@@ -509,14 +458,18 @@ class Connection(object):
         eventlet.spawn(self.consume)
 
 
-def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
-    timeout = timeout or FLAGS.rpc_response_timeout
-    conn = ZmqClient(addr, socket_type)
+def _send(addr, style, context, topic, msg, timeout=None):
+    # timeout_response is how long we wait for a response
+    timeout_response = timeout or FLAGS.rpc_response_timeout
+    # timeout_msg is for another host to receive the message
+    timeout_msg = 30
+
+    conn = ZmqClient(addr)
 
     if style == 'cast':
         try:
             # Casts should be quick, don't use standard time-out.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t:
+            with Timeout(timeout_msg, exception=nova.rpc.common.Timeout) as t:
                 payload = [RpcContext.marshal(context), msg]
                 # assumes cast can't return an exception
                 return conn.cast(topic, topic, payload)
@@ -559,7 +512,7 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
     try:
         with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
             # We timeout no more than 30 seconds for the cast itself.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t1:
+            with Timeout(timeout_msg, exception=nova.rpc.common.Timeout) as t1:
                 conn.cast(msg_id, topic, payload)
 
             # Blocks until receives reply
@@ -592,8 +545,6 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     # We memoize matchmaker through this global
     global matchmaker
 
-    socket_type = socket_type or TopicManager.PUSH
-
     if topic.endswith(".None"):
         topic = topic.rsplit(".", 1)[0]
     if topic.endswith("."):
@@ -602,18 +553,16 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     if not matchmaker:
         constructor = globals()[FLAGS.rpc_zmq_matchmaker]
         matchmaker = constructor()
-    addresses = matchmaker.get_workers(context, socket_type, topic)
+    addresses = matchmaker.get_workers(context, topic)
 
     LOG.debug(_("Sending message(s) to: %s") % addresses)
 
     # This supports brokerless fanout (addresses > 1)
     for addr in addresses:
         if style == "cast":
-            eventlet.spawn_n(_send, addr, style, context, topic, msg,
-                             socket_type, timeout)
+            eventlet.spawn_n(_send, addr, style, context, topic, msg, timeout)
         else:
-            return _send(addr, style, context, topic,
-                         msg, socket_type, timeout)
+            return _send(addr, style, context, topic, msg, timeout)
 
 
 def create_connection(new=True):
@@ -649,8 +598,7 @@ def fanout_cast(context, topic, msg):
     """ Send a message to all listening and expect no reply """
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _multi_send("cast", context, str(topic), msg,
-          socket_type=TopicManager.ROUTER_PUB)
+    _multi_send("cast", context, str(topic), msg)
 
 
 def notify(context, topic, msg):
