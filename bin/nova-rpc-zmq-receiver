@@ -48,11 +48,21 @@ if __name__ == '__main__':
     logging.setup()
     utils.monkey_patch()
 
+    ipc_dir = '/var/run/nova'
+    in_addr = 'inproc://zmq_reply_queue'
+    out_addr = "ipc://%s/zmq_reply_queue" % ipc_dir
+
+    # Create the necessary directories/files for this service.
+    if not os.path.isdir(ipc_dir):
+        utils.execute('mkdir', '-p', ipc_dir, run_as_root=True)
+        utils.execute('chown', "%s:%s" % (os.getuid(), os.getgid()),
+                      ipc_dir, run_as_root=True)
+        utils.execute('chmod', '750', ipc_dir, run_as_root=True)
+
     topic = "zmq_replies.%s" % socket.gethostname()
     proxy = impl_zmq.InternalContext(None)
 
-    conn = impl_zmq.create_connection(new=True)
-    conn.create_consumer(topic, proxy, fanout=False, replysvc=True)
-    conn.create_consumer(topic, proxy, fanout=False)
-    conn.consume_in_thread()
-    conn.wait()
+    reactor = impl_zmq.ZmqReactor()
+    reactor.register(proxy, in_addr, zmq.PULL, out_addr, zmq.PUB)
+    reactor.consume()
+    reactor.wait()

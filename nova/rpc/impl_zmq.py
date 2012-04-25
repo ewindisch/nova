@@ -412,31 +412,16 @@ class Connection(object):
 
     def create_consumer(self, topic, proxy, fanout, isbroker=False,
                         replysvc=False):
-        if replysvc:
-            ipc_dir = '/var/run/nova'
-
-            in_addr = 'inproc://zmq_reply_queue'
-            out_addr = "ipc://%s/zmq_reply_queue" % ipc_dir
-
-            if not os.path.isdir(ipc_dir):
-                utils.execute('mkdir', '-p', ipc_dir, run_as_root=True)
-                utils.execute('chown', "%s:%s" % (os.getuid(), os.getgid()),
-                              ipc_dir, run_as_root=True)
-                utils.execute('chmod', '750', ipc_dir, run_as_root=True)
-
-            self.reactor.register(proxy,
-                                  in_addr, zmq.PULL, out_addr, zmq.PUB)
-            return 0
-
         if '.' not in topic:
             LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
                 {'topic': topic})
 
-            inaddr = TopicManager.listen_addr(topic, TopicManager.PUSH)
+            # Register for incoming requests
+            inaddr = TopicManager.listen_addr(topic, TopicManager.REQUEST)
             self.reactor.register(proxy, inaddr, zmq.PULL)
             return 0
 
-        LOG.DEBUG(_("How did this happen?"))
+        LOG.DEBUG(_("Not listening on bare topic."))
 
     def close(self):
         self.reactor.close()
