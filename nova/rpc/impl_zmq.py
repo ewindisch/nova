@@ -15,7 +15,7 @@
 #    under the License.
 
 import eventlet
-from greenlet import GreenletExit
+import greenlet
 eventlet.monkey_patch()
 
 import collections
@@ -24,7 +24,6 @@ import hashlib
 import itertools
 import json
 import os
-from pprint import pformat
 import random
 import socket
 import string
@@ -34,15 +33,18 @@ import traceback
 import uuid
 
 from eventlet.green import zmq
-from eventlet.timeout import Timeout
+from eventlet import timeout as eventlet_timeout
 
 from nova import context
-from nova.openstack.common import cfg
-import nova.rpc.common
-from nova.rpc.common import RemoteError, LOG
 from nova import flags
-from nova.rpc import matchmaker
 from nova import utils
+from nova.openstack.common import cfg
+from nova.rpc import common as rpc_common
+from nova.rpc import matchmaker
+
+Timeout = eventlet_timeout.Timeout
+LOG = rpc_common.LOG
+RemoteError = rpc_common.RemoteError
 
 zmq_opts = [
     # ZeroMQ bind 'host' should be a wildcard (*),
@@ -270,7 +272,7 @@ class InternalContext(object):
             else:
                 result = func(ctx)
             return ConsumerBase.normalize_reply(result, ctx.replies)
-        except GreenletExit:
+        except greenlet.GreenletExit:
             # ignore these since they are just from shutdowns
             pass
         except Exception:
