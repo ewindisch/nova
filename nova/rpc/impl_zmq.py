@@ -72,6 +72,18 @@ ZMQ_CTX = zmq.Context(1)
 matchmaker = None
 
 
+def _serialize(self, data):
+    """Serialization wrapper"""
+    #return json.dumps(data)
+    return pickle.dumps(data, version=2)
+
+
+def _deserialize(self, data):
+    """Deserialization wrapper"""
+    #return json.loads(data)
+    return pickle.loads(data)
+
+
 class TopicManager(object):
     """ TopicManager helps us manage our topics """
     # Requests and replies work the same way,
@@ -172,8 +184,7 @@ class ZmqClient(object):
         self.outq = QueueSocket(addr, socket_type, bind=bind, recv=recv)
 
     def cast(self, msg_id, topic, data):
-        self.outq.send([str(msg_id), str(topic), str('cast'),
-                        pickle.dumps(data, protocol=2)])
+        self.outq.send([str(msg_id), str(topic), str('cast'), _serialize(data))
 
     def close(self):
         self.outq.close()
@@ -193,11 +204,11 @@ class RpcContext(context.RequestContext):
     @classmethod
     def marshal(self, ctx):
         ctx_data = ctx.to_dict()
-        return pickle.dumps(ctx_data, protocol=2)
+        return _serialize(ctx_data)
 
     @classmethod
     def unmarshal(self, data):
-        return RpcContext.from_dict(pickle.loads(data))
+        return RpcContext.from_dict(_deserialize(data))
 
 
 class InternalContext(object):
@@ -368,6 +379,7 @@ class ZmqReactor(ConsumerBase):
         LOG.debug(_("Out reactor registered"))
 
     def _procsocket(self, sock):
+        #TODO(ewindisch): use zero-copy (i.e. references, not copying)
         while True:
             data = sock.recv()
             if sock in self.mapping:
@@ -382,7 +394,7 @@ class ZmqReactor(ConsumerBase):
 
                 #LOG.debug(_("DATA: %s") % \
                 #            ' '.join(map(pformat, in_msg)))
-                ctx, request = pickle.loads(in_msg)
+                ctx, request = _deserialize(in_msg)
                 ctx = RpcContext.unmarshal(ctx)
 
                 proxy = self.proxies[sock]
@@ -501,7 +513,7 @@ def _send(addr, style, context, topic, msg, timeout=None):
                 conn.cast(msg_id, topic, payload)
 
             # Blocks until receives reply
-            responses = pickle.loads(msg_waiter.recv()[-1])
+            responses = _deserialize(msg_waiter.recv()[-1])
     finally:
         conn.close()
         msg_waiter.close()
