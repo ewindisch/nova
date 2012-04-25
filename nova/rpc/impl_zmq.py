@@ -14,6 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# Eventlet/monkey_patch is an exception to HACKING
 import eventlet
 import greenlet
 eventlet.monkey_patch()
