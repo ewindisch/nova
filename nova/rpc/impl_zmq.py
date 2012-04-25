@@ -444,16 +444,16 @@ class Connection(object):
 
     def create_consumer(self, topic, proxy, fanout, isbroker=False,
                         replysvc=False):
-        if '.' not in topic:
-            LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
-                {'topic': topic})
+        if '.' in topic:
+            LOG.DEBUG(_("Not listening on bare topic."))
+            return 1
 
-            # Register for incoming requests
-            inaddr = TopicManager.listen_addr(topic, TopicManager.REQUEST)
-            self.reactor.register(proxy, inaddr, zmq.PULL)
-            return 0
+        LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
+            {'topic': topic})
 
-        LOG.DEBUG(_("Not listening on bare topic."))
+        # Register for incoming requests
+        inaddr = TopicManager.listen_addr(topic, TopicManager.REQUEST)
+        self.reactor.register(proxy, inaddr, zmq.PULL)
 
     def close(self):
         self.reactor.close()
