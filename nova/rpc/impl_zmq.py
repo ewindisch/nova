@@ -63,25 +63,42 @@ zmq_opts = [
     cfg.IntOpt('rpc_zmq_start_port', default=9500,
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
 
+    cfg.IntOpt('rpc_zmq_contexts', default=1,
+        help='number of ZeroMQ contexts, defaults to 1')
+
     ]
 
 FLAGS = flags.FLAGS
 FLAGS.register_opts(zmq_opts)
-ZMQ_CTX = zmq.Context(1)
+ZMQ_CTX = zmq.Context(FLAGS.rpc_zmq_contexts)
 
 matchmaker = None
 
 
 def _serialize(self, data):
-    """Serialization wrapper"""
-    #return json.dumps(data)
-    return pickle.dumps(data, version=2)
+    """
+    Serialization wrapper
+    We prefer using JSON, but it cannot encode all types.
+    If encoding fails as JSON, fallback to Pickle.
+    """
+    #TODO(ewindisch): verify if we can eliminate this and ONLY use JSON
+    try:
+        return json.dumps(data)
+    except TypeError:
+        return pickle.dumps(data, version=2)
 
 
 def _deserialize(self, data):
-    """Deserialization wrapper"""
-    #return json.loads(data)
-    return pickle.loads(data)
+    """
+    Deserialization wrapper
+    We prefer using JSON, but cannot encode all types.
+    If input is not JSON, fallback to Pickle.
+    """
+    #TODO(ewindisch): verify if we can eliminate this and ONLY use JSON
+    try:
+        return json.loads(data)
+    except ValueError:
+        return pickle.loads(data)
 
 
 class TopicManager(object):
