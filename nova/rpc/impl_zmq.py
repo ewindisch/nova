@@ -592,7 +592,7 @@ def notify(context, topic, msg):
 
 
 def cleanup():
-    """Clean up resoruces in use by implementation."""
+    """Clean up resources in use by implementation."""
 
     # NOTE(ewindisch): All cleanup should be handled by
     # Connection.close().  Managing the connections
