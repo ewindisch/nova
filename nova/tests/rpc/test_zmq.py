@@ -35,7 +35,7 @@ except ImportError:
 LOG = logging.getLogger('nova.tests.rpc')
 
 
-class _RpcZmqBaseTestCase(common._BaseRpcTestCase):
+class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
     def tearDown(self):
         if impl_zmq:
             super(_RpcZmqBaseTestCase, self).tearDown()

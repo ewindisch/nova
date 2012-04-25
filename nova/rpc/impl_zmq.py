@@ -25,6 +25,7 @@ import hashlib
 import itertools
 import json
 import os
+import pprint
 import random
 import socket
 import string
@@ -43,6 +44,7 @@ from nova.openstack.common import cfg
 from nova.rpc import common as rpc_common
 from nova.rpc import matchmaker
 
+pformat = pprint.pformat
 Timeout = eventlet_timeout.Timeout
 LOG = rpc_common.LOG
 RemoteError = rpc_common.RemoteError
@@ -57,11 +59,6 @@ zmq_opts = [
     # The module to use for matchmaking.
     cfg.StrOpt('rpc_zmq_matchmaker', default='matchmaker.MatchMakerRing',
         help='MatchMaker driver'),
-
-    # Matchmaker ring file
-    cfg.StrOpt('rpc_zmq_matchmaker_ringfile',
-        default='/etc/nova/matchmaker_ring.json',
-        help='Matchmaker ring file (JSON)'),
 
     cfg.IntOpt('rpc_zmq_start_port', default=9500,
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
@@ -134,8 +131,7 @@ class TopicManager(object):
         tsplit = topic.split(".", 1)
         base_topic = tsplit[0]
 
-        port_offset = self.topics()[base_topic] + \
-            len(self.topics()) * (socket_type + 1)
+        port_offset = socket_type
         return FLAGS.rpc_zmq_start_port + port_offset
 
     @classmethod
@@ -207,7 +203,8 @@ class ZmqClient(object):
         self.outq = QueueSocket(addr, socket_type, bind=bind, recv=recv)
 
     def cast(self, msg_id, topic, data):
-        self.outq.send([str(msg_id), str(topic), str('cast'), _serialize(data))
+        self.outq.send([str(msg_id), str(topic), str('cast'),
+            _serialize(data)])
 
     def close(self):
         self.outq.close()
@@ -448,14 +445,14 @@ class Connection(object):
     def create_consumer(self, topic, proxy, fanout, isbroker=False,
                         replysvc=False):
         if '.' in topic:
-            LOG.DEBUG(_("Not listening on bare topic."))
+            LOG.debug(_("Not listening on bare topic."))
             return 1
 
         LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
             {'topic': topic})
 
         # Register for incoming requests
-        inaddr = TopicManager.listen_addr(topic, TopicManager.REQUEST)
+        inaddr = TopicManager.listen_addr(topic, TopicManager.REQUESTS)
         self.reactor.register(proxy, inaddr, zmq.PULL)
 
     def close(self):
