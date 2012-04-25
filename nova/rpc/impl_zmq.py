@@ -52,7 +52,7 @@ zmq_opts = [
         help='ZeroMQ bind address'),
 
     # The module to use for matchmaking.
-    cfg.StrOpt('rpc_zmq_matchmaker', default='nova.rpc.matchmaker.MatchMakerFanoutRing',
+    cfg.StrOpt('rpc_zmq_matchmaker', default='matchmaker.MatchMakerRing',
         help='MatchMaker driver'),
 
     # Matchmaker ring file
