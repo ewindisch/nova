@@ -84,14 +84,5 @@ class DatabaseManager(manager.Manager):
     def init_host(self):
         pass
 
-    def _call(self, name):
-        # Curry method into the rpc call, only accept args to def
-        def rpccall(args):
-            rpc.call(self.context, self.topic, {
-                "method": name,
-                "args": args
-            })
-        return rpccall
-
     def __getattr__(self, name):
-        return self._call(name)
+        return self.driver.get_attr(name)
