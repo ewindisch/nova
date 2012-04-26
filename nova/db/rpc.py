@@ -11,14 +11,28 @@ LOG = logging.getLogger(__name__)
 
 CONTEXT = nova.context.get_admin_context()
 
-def _call(self, name):
+#TODO(ewindisch): create following StrOpts:
+# - database_write_topic, default=database.localhost or database?
+# - database_topic, default=database
+
+def _call(self, name, topic=None):
+    topic = topic or FLAGS.database_topic
+
     # Curry method into the rpc call, only accept args to def
     def rpccall(args):
-        rpc.call(CONTEXT, FLAGS.database_topic, {
+        rpc.call(CONTEXT, topic, {
             "method": name,
             "args": args
         })
     return rpccall
 
 def __getattr__(self, name):
+    write_cmds = ( 'update',
+                   'write',
+                   'associate',
+                   'create',
+                   'delete' )
+    for cmd in write_cmds:
+        if name.find(cmd) > -1:
+        	return self._call(name, FLAGS.database_write_topic)
     return self._call(name)
