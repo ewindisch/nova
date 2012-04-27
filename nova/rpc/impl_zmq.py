@@ -42,7 +42,7 @@ from nova import flags
 from nova import utils
 from nova.openstack.common import cfg
 from nova.rpc import common as rpc_common
-from nova.rpc import matchmaker
+from nova.rpc import matchmaker as mod_matchmaker
 
 pformat = pprint.pformat
 Timeout = eventlet_timeout.Timeout
@@ -57,7 +57,7 @@ zmq_opts = [
         help='ZeroMQ bind address'),
 
     # The module to use for matchmaking.
-    cfg.StrOpt('rpc_zmq_matchmaker', default='matchmaker.MatchMakerRing',
+    cfg.StrOpt('rpc_zmq_matchmaker', default='mod_matchmaker.MatchMakerRing',
         help='MatchMaker driver'),
 
     cfg.IntOpt('rpc_zmq_start_port', default=9500,
@@ -562,26 +562,25 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     # We memoize matchmaker through this global
     global matchmaker
 
-    # Strip/clean the topics.
-    # Should these go into the matchmaker too?
-    if topic.endswith(".None"):
-        topic = topic.rsplit(".", 1)[0]
-    if topic.endswith("."):
-        topic = topic.rsplit(".", 1)[0]
-
     if not matchmaker:
-        constructor = globals()[FLAGS.rpc_zmq_matchmaker]
-        matchmaker = constructor()
-    addresses = matchmaker.get_workers(context, topic)
+        #module = globals()['matchmaker'] #FLAGS.rpc_zmq_matchmaker]
+        #constructor = globals()[FLAGS.rpc_zmq_matchmaker]
+        #constructor = getattr(module, 'MatchMakerRing')
+        #constructor = getattr(FLAGS.rpc_zmq_matchmaker, '__init__')
+        #matchmaker = constructor()
+        matchmaker = mod_matchmaker.MatchMakerRing()
 
-    LOG.debug(_("Sending message(s) to: %s") % addresses)
+    matches = matchmaker.get_workers(style, context, topic)
+
+    LOG.debug(_("Sending message(s) to: %s") % matches)
 
     # This supports brokerless fanout (addresses > 1)
-    for addr in addresses:
-        if style == "cast":
-            eventlet.spawn_n(_send, addr, style, context, topic, msg, timeout)
+    for match in matches:
+    	(l_style, l_context, l_topic) = match
+        if style.endswith("cast"):
+            eventlet.spawn_n(_send, addr, l_style, l_context, l_topic, msg, timeout)
         else:
-            return _send(addr, style, context, topic, msg, timeout)
+            return _send(addr, l_style, l_context, l_topic, msg, timeout)
 
 
 def create_connection(new=True):
@@ -617,7 +616,7 @@ def fanout_cast(context, topic, msg):
     """ Send a message to all listening and expect no reply """
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _multi_send("cast", context, str(topic), msg)
+    _multi_send("fanout-cast", context, str(topic), msg)
 
 
 def notify(context, topic, msg):
