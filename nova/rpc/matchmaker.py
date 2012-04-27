@@ -19,6 +19,7 @@ from greenlet import GreenletExit
 eventlet.monkey_patch()
 
 import collections
+import contextlib
 import cPickle as pickle
 import hashlib
 import itertools
@@ -42,6 +43,8 @@ from nova.rpc.common import RemoteError, LOG
 from nova import flags
 from nova import utils
 
+
+contextmanager = contextlib.contextmanager
 
 zmq_opts = [
     # Matchmaker ring file
@@ -95,32 +98,84 @@ class MatchMakerBase(object):
     def add_negate_condition(self, condition, rule, last=False):
         self.conditions.append((condition, rule, True, last))
 
-    def get_worker(self, context, topic):
+    def get_workers(self, style, context, topic):
         workers = []
         for (condition, rule, bit, last) in self.conditions:
-        	x = condition.run(context, topic)
-        	if (bit and not x) or x:
-        		workers.extend(rule.run(context, topic))
+        	#x = condition.run(context, topic)
+        	#if (bit and not x) or x:
+        	#	workers.extend(rule.run(style, context, topic))
+        	with condition:
+        		workers.extend(rule.run(style, context, topic))
 
         	if len(workers) >= limit:
         		return workers[0:limit]
         return workers
 
-    #def get_workers(self, context, topic, limit=1):
-
 
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class RulePass(RewriteRule):
-    def run(self, context, topic):
-        return (context, topic)
+    def run(self, style, context, topic):
+        return (style, context, topic)
+
+
+class PrettyContext(object):
+    def __init__(self, method):
+        self.meth=method
+        #pass
+    def __enter__(self):
+        try:
+            return self.meth.next()
+        except StopIteration:
+            return
+        #return self
+    def __exit__(self, type, value, tb):
+        try:
+            return self.meth.next()
+        except StopIteration:
+            return True
+
+
+def prettycontext(fun):
+    def helper(*args, **kwargs):
+        return(PrettyContext(fun(*args, **kwargs)))
+    return helper
 
 
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
+@prettycontext  #contextmanager
+def condbaretopic(style, context, topic):
+    if '.' not in topic:
+    	print "foo!"
+        yield
+
+with condbaretopic('a.a','b.d','cd'):
+    print "hello world"
+
+with condbaretopic('a.a','b.d','c.d'):
+    print "hello world"
+
+
+@prettycontext
+def condfanout(style, context, topic):
+    if topic.startswith('fanout'):
+        yield
+
+
 class ConditionBareTopic(RewriteCond):
-    def _test(self, context, topic):
+    #def _test(
+    def __enter__(self, style, context, topic):
         if '.' not in topic:
+            return True
+        return False
+
+
+# Get a host on bare topics.
+# Not needed for ROUTER_PUB which is always brokered.
+class ConditionFanout(RewriteCond):
+    def __enter__(self, style, context, topic):
+        if topic.startswith('fanout'):
             return True
         return False
 
@@ -172,7 +227,8 @@ class MatchMakerRing(MatchMakerBase):
         super(MatchMakerRing, self).__init__() #*args, **kwargs)
 
         # round-robin
-        self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
+        #self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
+        self.add_condition(condbaretopic, NextTopicRule(), last=True)
         # fanout messaging
         self.add_condition(
             [ConditionBareTopic(), ConditionFanout()],
@@ -187,6 +243,11 @@ class MatchMakerRing(MatchMakerBase):
         fh.close()
         LOG.debug(_("RING:\n%s"), self.ring0)
 
-#    def get_workers(self, context, topic):
-#        if '.' not in topic:
-#        	return self.ring0[topic].next()
+    def get_workers(self, style, context, topic):
+        if topic not in self.ring:
+        	return []
+        if style.startswith("fanout"):
+        	return self.ring[topic]
+        if '.' not in topic:
+        	return self.ring0[topic].next()
+        return [(style, context, topic), ]
