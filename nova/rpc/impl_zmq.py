@@ -428,6 +428,10 @@ class ZmqReactor(ConsumerBase):
                 eventlet.spawn(self._procsocket, k)
             )
 
+    def wait(self):
+        for t in self.threads:
+        	t.wait()
+
     def close(self):
         for s in self.sockets:
             s.close()
@@ -573,6 +577,11 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     matches = matchmaker.get_workers(style, context, topic)
 
     LOG.debug(_("Sending message(s) to: %s") % matches)
+
+    # Don't stack if we have no matchmaker results
+    if len(matches) == 0:
+    	LOG.debug(_("No matchmaker results. Not casting."))
+    	return [style, topic, ['']]
 
     # This supports brokerless fanout (addresses > 1)
     for match in matches:
