@@ -31,8 +31,7 @@ except ImportError:
     zmq = None
     impl_zmq = None
 
-
-LOG = logging.getLogger('nova.tests.rpc')
+LOG = logging.getLogger(__name__)
 
 
 class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
@@ -41,47 +40,8 @@ class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
             super(_RpcZmqBaseTestCase, self).tearDown()
 
     @test.skip_if(zmq is None, "Test requires zmq")
-    def test_call_succeed(self):
-        super(_RpcZmqBaseTestCase, self).test_call_succeed()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_call_succeed_despite_multiple_returns(self):
-        super(_RpcZmqBaseTestCase,
-            self).test_call_succeed_despite_multiple_returns()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_call_succeed_despite_multiple_returns_yield(self):
-        super(_RpcZmqBaseTestCase,
-            self).test_call_succeed_despite_multiple_returns_yield()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_multicall_succeed_once(self):
-        super(_RpcZmqBaseTestCase, self).test_multicall_succeed_once()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_multicall_succeed_three_times(self):
-        super(_RpcZmqBaseTestCase, self).test_multicall_succeed_three_times()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_multicall_three_nones(self):
-        super(_RpcZmqBaseTestCase, self).test_multicall_three_nones()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_multicall_succeed_three_times_yield(self):
-        super(_RpcZmqBaseTestCase,
-            self).test_multicall_succeed_three_times_yield()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_context_passed(self):
-        super(_RpcZmqBaseTestCase, self).test_context_passed()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_nested_calls(self):
-        super(_RpcZmqBaseTestCase, self).test_nested_calls()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
-    def test_call_timeout(self):
-        super(_RpcZmqBaseTestCase, self).test_call_timeout()
+    def __getattr__(self, name):
+        super(_RpcZmqBaseTestCase, self).getattr(name)
 
 
 class RpcZmqBaseTopicTestCase(_RpcZmqBaseTestCase):
