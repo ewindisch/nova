@@ -76,10 +76,6 @@ class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
         super(_RpcZmqBaseTestCase, self).test_context_passed()
 
     @test.skip_if(zmq is None, "Test requires zmq")
-    def test_call_exception(self):
-        super(_RpcZmqBaseTestCase, self).test_call_exception()
-
-    @test.skip_if(zmq is None, "Test requires zmq")
     def test_nested_calls(self):
         super(_RpcZmqBaseTestCase, self).test_nested_calls()
 
