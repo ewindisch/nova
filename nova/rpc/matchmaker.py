@@ -142,19 +142,19 @@ def prettycontext(fun):
     return helper
 
 
-# Get a host on bare topics.
-# Not needed for ROUTER_PUB which is always brokered.
-@prettycontext  #contextmanager
-def condbaretopic(style, context, topic):
-    if '.' not in topic:
-    	print "foo!"
-        yield
-
-with condbaretopic('a.a','b.d','cd'):
-    print "hello world"
-
-with condbaretopic('a.a','b.d','c.d'):
-    print "hello world"
+## Get a host on bare topics.
+## Not needed for ROUTER_PUB which is always brokered.
+#@prettycontext  #contextmanager
+#def condbaretopic(style, context, topic):
+#    if '.' not in topic:
+#    	print "foo!"
+#        yield
+#
+#with condbaretopic('a.a','b.d','cd'):
+#    print "hello world"
+#
+#with condbaretopic('a.a','b.d','c.d'):
+#    print "hello world"
 
 
 @prettycontext
@@ -227,8 +227,9 @@ class MatchMakerRing(MatchMakerBase):
         super(MatchMakerRing, self).__init__() #*args, **kwargs)
 
         # round-robin
-        #self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
-        self.add_condition(condbaretopic, NextTopicRule(), last=True)
+        ##self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
+        #self.add_condition(condbaretopic, NextTopicRule(), last=True)
+
         # fanout messaging
         self.add_condition(
             [ConditionBareTopic(), ConditionFanout()],
