@@ -456,9 +456,10 @@ class Connection(object):
         LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
             {'topic': topic})
 
+        #TODO(ewindich): Update to pull from receiver daemon
         # Register for incoming requests
-        inaddr = TopicManager.listen_addr(topic, TopicManager.REQUESTS)
-        self.reactor.register(proxy, inaddr, zmq.PULL)
+        #inaddr = TopicManager.listen_addr(topic, TopicManager.REQUESTS)
+        #self.reactor.register(proxy, inaddr, zmq.PULL)
 
     def close(self):
         self.reactor.close()
