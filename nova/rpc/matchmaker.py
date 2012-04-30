@@ -245,6 +245,7 @@ class MatchMakerRing(MatchMakerBase):
         LOG.debug(_("RING:\n%s"), self.ring0)
 
     def get_workers(self, style, context, topic):
+        raise Exception, "Set Sail for Fail"
         if topic not in self.ring:
         	return []
         if style.startswith("fanout"):
@@ -252,3 +253,17 @@ class MatchMakerRing(MatchMakerBase):
         if '.' not in topic:
         	return self.ring0[topic].next()
         return [(style, context, topic), ]
+
+
+class MatchMakerLocalhost(MatchMakerBase):
+    """
+    Match Maker where all bare topics resolve to localhost.
+    Useful for testing.
+    """
+    def __init__(self):
+        super(MatchMakerLocalhost, self).__init__()
+
+    def get_workers(self, style, context, topic):
+        if '.' not in topic:
+        	return [(style, context, topic+'.localhost', 'localhost')]
+        return [(style, context, topic, 'localhost'), ]

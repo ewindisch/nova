@@ -37,6 +37,7 @@ import uuid
 from eventlet.green import zmq
 from eventlet import timeout as eventlet_timeout
 
+import nova
 from nova import context
 from nova import flags
 from nova import utils
@@ -75,7 +76,7 @@ ZMQ_CTX = zmq.Context(FLAGS.rpc_zmq_contexts)
 matchmaker = None
 
 
-def _serialize(self, data):
+def _serialize(data):
     """
     Serialization wrapper
     We prefer using JSON, but it cannot encode all types.
@@ -88,7 +89,7 @@ def _serialize(self, data):
         return pickle.dumps(data, version=2)
 
 
-def _deserialize(self, data):
+def _deserialize(data):
     """
     Deserialization wrapper
     We prefer using JSON, but cannot encode all types.
@@ -567,12 +568,10 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     global matchmaker
 
     if not matchmaker:
-        #module = globals()['matchmaker'] #FLAGS.rpc_zmq_matchmaker]
-        #constructor = globals()[FLAGS.rpc_zmq_matchmaker]
-        #constructor = getattr(module, 'MatchMakerRing')
-        #constructor = getattr(FLAGS.rpc_zmq_matchmaker, '__init__')
-        #matchmaker = constructor()
-        matchmaker = mod_matchmaker.MatchMakerRing()
+        module = globals()['mod_matchmaker']
+        # split(FLAGS.rpc_zmq_matchmaker, '.')
+        constructor = getattr(module, 'MatchMakerLocalhost')
+        matchmaker = constructor()
 
     matches = matchmaker.get_workers(style, context, topic)
 
@@ -581,15 +580,19 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
     # Don't stack if we have no matchmaker results
     if len(matches) == 0:
     	LOG.debug(_("No matchmaker results. Not casting."))
+    	raise Exception, "No Match from Matchmaker"
     	return [style, topic, ['']]
 
     # This supports brokerless fanout (addresses > 1)
     for match in matches:
-    	(l_style, l_context, l_topic) = match
+    	(_style, _context, _topic, ip_addr) = match
+
+        #cfg.IntOpt('rpc_zmq_start_port', default=9500,
+    	_addr = "tcp://%s:%s" % (ip_addr, FLAGS.rpc_zmq_start_port)
         if style.endswith("cast"):
-            eventlet.spawn_n(_send, addr, l_style, l_context, l_topic, msg, timeout)
+            eventlet.spawn_n(_send, _addr, _style, _context, _topic, msg, timeout)
         else:
-            return _send(addr, l_style, l_context, l_topic, msg, timeout)
+            return _send(_addr, _style, _context, _topic, msg, timeout)
 
 
 def create_connection(new=True):
