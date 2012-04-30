@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
     reactor.register(consumption_proxy,
                      consume_in, zmq.PULL,
-                     consume_out, zmq.PUB)
+                     consume_out, zmq.PUSH, out_bind=False)
 
     reactor.consume()
     reactor.wait()
