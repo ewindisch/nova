@@ -100,60 +100,6 @@ def _deserialize(data):
         return pickle.loads(data)
 
 
-class TopicManager(object):
-    """ TopicManager helps us manage our topics """
-    # Requests and replies work the same way,
-    # but they are useful to separate for network ACL purposes.
-
-    # Requests == in
-    REQUESTS = 0
-    # Replies == in (but replies, obviously)
-    REPLIES = 1
-    # Out
-    FORWARD = 2
-
-    ROUTER_PUSH = 0  # Input for central broker RR queue  (send to this)
-    ROUTER_PULL = 1  # Output for central broker RR queue (pull from this)
-    ROUTER_PUB = 2  # Input for Router P/S
-    ROUTER_SUB = 3  # Output for Router P/S
-    # Distributed cast
-    PUSH = 5
-
-    _topics = None
-
-    def __init__(self):
-        pass
-
-    @classmethod
-    def port(self, topic, socket_type):
-        """ Returns port for a given topic """
-        tsplit = topic.split(".", 1)
-        base_topic = tsplit[0]
-
-        port_offset = socket_type
-        return conf.rpc_zmq_start_port + port_offset
-
-    @classmethod
-    def addr(self, topic, socket_type):
-        """ Returns connection address for topic """
-
-        tsplit = topic.split(".", 1)
-        base_topic = tsplit[0]
-        if len(tsplit) == 2:
-            host = tsplit[1]
-
-        port = self.port(topic, socket_type)
-        return "tcp://%s:%s" % (host, port)
-
-    @classmethod
-    def listen_addr(self, topic, socket_type):
-        """ Returns listening address for topic """
-        port = self.port(topic, socket_type)
-        return "tcp://%s:%s" % \
-                (conf.rpc_zmq_bind_address,
-                 port)
-
-
 class QueueSocket(object):
     """
     A tiny wrapper around ZeroMQ to simplify the send/recv protocol
