@@ -131,7 +131,7 @@ class TopicManager(object):
         base_topic = tsplit[0]
 
         port_offset = socket_type
-        return FLAGS.rpc_zmq_start_port + port_offset
+        return conf.rpc_zmq_start_port + port_offset
 
     @classmethod
     def addr(self, topic, socket_type):
@@ -533,7 +533,7 @@ class Connection(object):
 
 def _send(addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
-    timeout_response = timeout or FLAGS.rpc_response_timeout
+    timeout_response = timeout or conf.rpc_response_timeout
     # timeout_msg is for another host to receive the message
     timeout_msg = 30
 
@@ -621,7 +621,7 @@ def _multi_send(conf, style, context, topic, msg,
 
     if not matchmaker:
         module = globals()['mod_matchmaker']
-        # split(FLAGS.rpc_zmq_matchmaker, '.')
+        # split(conf.rpc_zmq_matchmaker, '.')
         constructor = getattr(module, 'MatchMakerLocalhost')
         matchmaker = constructor()
 
@@ -640,7 +640,7 @@ def _multi_send(conf, style, context, topic, msg,
     	(_style, _context, _topic, ip_addr) = match
 
         #cfg.IntOpt('rpc_zmq_start_port', default=9500,
-    	_addr = "tcp://%s:%s" % (ip_addr, FLAGS.rpc_zmq_start_port)
+    	_addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
         if style.endswith("cast"):
             eventlet.spawn_n(_send, _addr, _style, _context, _topic, msg, timeout)
         else:
