@@ -356,7 +356,7 @@ class ConsumerBase(object):
         return None
 
 
-class ZmqReactor(ConsumerBase):
+class ZmqBaseReactor(ConsumerBase):
     """
      A consumer class implementing a
      centralized casting broker (PULL-PUSH)
@@ -364,10 +364,11 @@ class ZmqReactor(ConsumerBase):
     """
 
     def __init__(self):
-        super(ZmqReactor, self).__init__()
+        super(ZmqBaseReactor, self).__init__()
 
         self.mapping = {}
         self.proxies = {}
+        self.topic_map = {}
         self.threads = []
         self.sockets = []
 
@@ -399,34 +400,14 @@ class ZmqReactor(ConsumerBase):
 
         LOG.debug(_("Out reactor registered"))
 
-    def _procsocket(self, sock):
-        #TODO(ewindisch): use zero-copy (i.e. references, not copying)
+    def _consumer(self, sock):
         while True:
-            data = sock.recv()
-            if sock in self.mapping:
-                #LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
-                #    'data': data})
-                self.mapping[sock].send(data)
-            else:
-                #LOG.debug(_("CONSUMER GOT %s") % \
-                #            ' '.join(map(pformat, data)))
-
-                msg_id, topic, style, in_msg = data
-
-                #LOG.debug(_("DATA: %s") % \
-                #            ' '.join(map(pformat, in_msg)))
-                ctx, request = _deserialize(in_msg)
-                ctx = RpcContext.unmarshal(ctx)
-
-                proxy = self.proxies[sock]
-
-                eventlet.spawn_n(self.process, style, topic,
-                                 proxy, ctx, request)
+        	self._procsocket(sock)
 
     def consume(self):
         for k in self.proxies.keys():
             self.threads.append(
-                eventlet.spawn(self._procsocket, k)
+                eventlet.spawn(_consumer, k)
             )
 
     def wait(self):
@@ -439,6 +420,77 @@ class ZmqReactor(ConsumerBase):
 
         for t in self.threads:
             t.kill()
+
+
+class ZmqProxy(ZmqBaseReactor):
+    """
+    A consumer class implementing a
+    topic-based proxy, forwarding to
+    IPC sockets.
+    """
+
+    def __init__(self):
+        super(ZmqProxy, self).__init__()
+
+    def _procsocket(self, sock):
+        #TODO(ewindisch): use zero-copy (i.e. references, not copying)
+        data = sock.recv()
+
+        LOG.debug(_("CONSUMER GOT %s") % \
+                    ' '.join(map(pformat, data)))
+
+        msg_id, topic, style, in_msg = data
+
+        LOG.debug(_("DATA: %s") % \
+                    ' '.join(map(pformat, in_msg)))
+        ctx, request = _deserialize(in_msg)
+        ctx = RpcContext.unmarshal(ctx)
+
+        if not topic in self.topic_proxy:
+            # Items push out.
+            outq = QueueSocket("ipc://var/run/nova/%s" % topic,
+                               zmq.PUSH, bind=True)
+            self.topic_proxy[topic] = outq
+            self.sockets.append(outq)
+            LOG.debug(_("Out reactor registered"))
+
+        LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
+            'data': data})
+        self.topic_proxy[topic].send(data)
+
+
+class ZmqReactor(ZmqBaseReactor):
+    """
+    A consumer class implementing a
+    consumer for messages. Can also be
+    used as a 1:1 proxy
+    """
+
+    def __init__(self):
+        super(ZmqReactor, self).__init__()
+
+    def _procsocket(self, sock):
+        #TODO(ewindisch): use zero-copy (i.e. references, not copying)
+        data = sock.recv()
+        if sock in self.mapping:
+            LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
+                'data': data})
+            self.mapping[sock].send(data)
+        else:
+            LOG.debug(_("CONSUMER GOT %s") % \
+                        ' '.join(map(pformat, data)))
+
+            msg_id, topic, style, in_msg = data
+
+            LOG.debug(_("DATA: %s") % \
+                        ' '.join(map(pformat, in_msg)))
+            ctx, request = _deserialize(in_msg)
+            ctx = RpcContext.unmarshal(ctx)
+
+            proxy = self.proxies[sock]
+
+            eventlet.spawn_n(self.process, style, topic,
+                             proxy, ctx, request)
 
 
 class Connection(object):

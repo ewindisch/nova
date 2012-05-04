@@ -267,3 +267,15 @@ class MatchMakerLocalhost(MatchMakerBase):
         if '.' not in topic:
         	return [(style, context, topic+'.localhost', 'localhost')]
         return [(style, context, topic, 'localhost'), ]
+
+
+class MatchMakerPassthrough(MatchMakerBase):
+    """
+    Match Maker where topics are untouched.
+    Useful for testing, or for AMQP/brokered queues.
+    """
+    def __init__(self):
+        super(MatchMakerLocalhost, self).__init__()
+
+    def get_workers(self, style, context, topic):
+        return [(style, context, topic, topic), ]
