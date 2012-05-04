@@ -63,8 +63,8 @@ class MatchMakerException(exception.NovaException):
 
 
 class RewriteRule(object):
-    """ 
-    Implements lookups. 
+    """
+    Implements lookups.
     Subclass this to support hashtables, dns, etc.
     """
     def __init__(self):
@@ -86,9 +86,9 @@ class RewriteCond(object):
 
     def run(self, context, topic):
         if self._test(context, topic):
-        	return True
+            return True
         return False
-    
+
 
 class MatchMakerBase(object):
     """Match Maker Base Class"""
@@ -106,14 +106,14 @@ class MatchMakerBase(object):
     def get_workers(self, style, context, topic):
         workers = []
         for (condition, rule, bit, last) in self.conditions:
-        	#x = condition.run(context, topic)
-        	#if (bit and not x) or x:
-        	#	workers.extend(rule.run(style, context, topic))
-        	with condition:
-        		workers.extend(rule.run(style, context, topic))
+            #x = condition.run(context, topic)
+            #if (bit and not x) or x:
+            #   workers.extend(rule.run(style, context, topic))
+            with condition:
+                workers.extend(rule.run(style, context, topic))
 
-        	if len(workers) >= limit:
-        		return workers[0:limit]
+            if len(workers) >= limit:
+                return workers[0:limit]
         return workers
 
 
@@ -126,14 +126,16 @@ class RulePass(RewriteRule):
 
 class PrettyContext(object):
     def __init__(self, method):
-        self.meth=method
+        self.meth = method
         #pass
+
     def __enter__(self):
         try:
             return self.meth.next()
         except StopIteration:
             return
         #return self
+
     def __exit__(self, type, value, tb):
         try:
             return self.meth.next()
@@ -229,7 +231,7 @@ class MatchMakerRing(MatchMakerBase):
         Match Maker where hosts are loaded from a static file
     """
     def __init__(self):
-        super(MatchMakerRing, self).__init__() #*args, **kwargs)
+        super(MatchMakerRing, self).__init__()  # *args, **kwargs)
 
         # round-robin
         ##self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
@@ -250,13 +252,13 @@ class MatchMakerRing(MatchMakerBase):
         LOG.debug(_("RING:\n%s"), self.ring0)
 
     def get_workers(self, style, context, topic):
-        raise Exception, "Set Sail for Fail"
+        #raise Exception, "Set Sail for Fail"
         if topic not in self.ring:
-        	return []
+            return []
         if style.startswith("fanout"):
-        	return self.ring[topic]
+            return self.ring[topic]
         if '.' not in topic:
-        	return self.ring0[topic].next()
+            return self.ring0[topic].next()
         return [(style, context, topic), ]
 
 
@@ -270,7 +272,7 @@ class MatchMakerLocalhost(MatchMakerBase):
 
     def get_workers(self, style, context, topic):
         if '.' not in topic:
-        	return [(style, context, topic+'.localhost', 'localhost')]
+            return [(style, context, topic + '.localhost', 'localhost')]
         return [(style, context, topic, 'localhost'), ]
 
 
