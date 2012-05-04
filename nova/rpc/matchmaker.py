@@ -20,7 +20,6 @@ eventlet.monkey_patch()
 
 import collections
 import contextlib
-import cPickle as pickle
 import hashlib
 import itertools
 import json
@@ -34,12 +33,9 @@ import types
 import traceback
 import uuid
 
-from eventlet.timeout import Timeout
-
 from nova import context
 from nova import exception
 from nova.openstack.common import cfg
-import nova.rpc.common
 from nova.rpc.common import RemoteError, LOG
 from nova import flags
 from nova import utils
@@ -47,7 +43,7 @@ from nova import utils
 
 contextmanager = contextlib.contextmanager
 
-zmq_opts = [
+matchmaker_opts = [
     # Matchmaker ring file
     cfg.StrOpt('rpc_zmq_matchmaker_ringfile',
         default='/etc/nova/matchmaker_ring.json',
@@ -55,7 +51,7 @@ zmq_opts = [
 ]
 
 FLAGS = flags.FLAGS
-FLAGS.register_opts(zmq_opts)
+FLAGS.register_opts(matchmaker_opts)
 
 
 class MatchMakerException(exception.NovaException):
