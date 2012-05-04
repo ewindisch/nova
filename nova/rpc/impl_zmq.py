@@ -69,10 +69,8 @@ zmq_opts = [
 
     ]
 
-FLAGS = flags.FLAGS
-FLAGS.register_opts(zmq_opts)
-ZMQ_CTX = zmq.Context(FLAGS.rpc_zmq_contexts)
 
+ZMQ_CTX = None
 matchmaker = None
 
 
@@ -152,7 +150,7 @@ class TopicManager(object):
         """ Returns listening address for topic """
         port = self.port(topic, socket_type)
         return "tcp://%s:%s" % \
-                (FLAGS.rpc_zmq_bind_address,
+                (conf.rpc_zmq_bind_address,
                  port)
 
 
@@ -561,7 +559,7 @@ def _send(addr, style, context, topic, msg, timeout=None):
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
-    hostname = FLAGS.host
+    hostname = conf.host
     base_topic = topic.split('.', 1)[0]
 
     # Replies always come into the reply service.
@@ -610,11 +608,12 @@ def _send(addr, style, context, topic, msg, timeout=None):
     return style, topic, all_data[-1]
 
 
-def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
+def _multi_send(conf, style, context, topic, msg,
+     socket_type=None, timeout=None):
     """
-    Implements sending of messages.
-    Determines which address to send a message to
-    and sends a message, manages replies from call()
+    Wraps the sending of messages,
+    dispatches to the matchmaker and sends
+    message to all relevant hosts.
     """
 
     # We memoize matchmaker through this global
@@ -648,45 +647,45 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
             return _send(_addr, _style, _context, _topic, msg, timeout)
 
 
-def create_connection(new=True):
+def create_connection(conf, new=True):
     return Connection()
 
 
-def multicall(context, topic, msg, timeout=None):
+def multicall(conf, context, topic, msg, timeout=None):
     """ Multiple calls """
     LOG.debug(_("RR MULTICALL %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    style, target, data = _multi_send("call", context, str(topic), msg,
+    style, target, data = _multi_send(conf, "call", context, str(topic), msg,
         timeout=timeout)
     return data
 
 
-def call(context, topic, msg, timeout=None):
+def call(conf, context, topic, msg, timeout=None):
     """ Send a message, expect a response """
     LOG.debug(_("RR CALL %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    style, target, data = _multi_send("call", context, str(topic), msg,
+    style, target, data = _multi_send(conf, "call", context, str(topic), msg,
         timeout=timeout)
     return data[-1]
 
 
-def cast(context, topic, msg):
+def cast(conf, context, topic, msg):
     """ Send a message expecting no reply """
     LOG.debug(_("RR CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
-    _multi_send("cast", context, str(topic), msg)
+    _multi_send(conf, "cast", context, str(topic), msg)
 
 
-def fanout_cast(context, topic, msg):
+def fanout_cast(conf, context, topic, msg):
     """ Send a message to all listening and expect no reply """
     LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
         (topic, msg)))})
     _multi_send("fanout-cast", context, str(topic), msg)
 
 
-def notify(context, topic, msg):
+def notify(conf, context, topic, msg):
     """Send notification event."""
-    cast(context, topic, msg)
+    cast(conf, context, topic, msg)
 
 
 def cleanup():
@@ -696,3 +695,14 @@ def cleanup():
     # Connection.close().  Managing the connections
     # through a class variable/method would be ugly & broken.
     pass
+
+
+def register_opts(conf):
+    """
+    Registration of options for this driver.
+    """
+    #NOTE(ewindisch): this is a bad place for the ZMQ_CTX stuff
+    global ZMQ_CTX
+    conf.register_opts(zmq_opts)
+    ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
+
