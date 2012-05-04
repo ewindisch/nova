@@ -37,6 +37,7 @@ import uuid
 from eventlet.timeout import Timeout
 
 from nova import context
+from nova import exception
 from nova.openstack.common import cfg
 import nova.rpc.common
 from nova.rpc.common import RemoteError, LOG
