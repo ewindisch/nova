@@ -349,7 +349,7 @@ class ZmqBaseReactor(ConsumerBase):
 
     def _consumer(self, sock):
         while True:
-        	self._procsocket(sock)
+            self._procsocket(sock)
 
     def consume(self):
         for k in self.proxies.keys():
@@ -359,7 +359,7 @@ class ZmqBaseReactor(ConsumerBase):
 
     def wait(self):
         for t in self.threads:
-        	t.wait()
+            t.wait()
 
     def close(self):
         for s in self.sockets:
@@ -581,18 +581,19 @@ def _multi_send(conf, style, context, topic, msg,
 
     # Don't stack if we have no matchmaker results
     if len(matches) == 0:
-    	LOG.debug(_("No matchmaker results. Not casting."))
-    	raise Exception, "No Match from Matchmaker"
-    	return [style, topic, ['']]
+        LOG.debug(_("No matchmaker results. Not casting."))
+        raise mod_matchmaker.MatchMakerException, "No Match from Matchmaker"
+        return [style, topic, ['']]
 
     # This supports brokerless fanout (addresses > 1)
     for match in matches:
-    	(_style, _context, _topic, ip_addr) = match
+        (_style, _context, _topic, ip_addr) = match
 
         #cfg.IntOpt('rpc_zmq_start_port', default=9500,
-    	_addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
+        _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
         if style.endswith("cast"):
-            eventlet.spawn_n(_send, _addr, _style, _context, _topic, msg, timeout)
+            eventlet.spawn_n(_send, _addr, _style, _context,
+                             _topic, msg, timeout)
         else:
             return _send(_addr, _style, _context, _topic, msg, timeout)
 
@@ -655,4 +656,3 @@ def register_opts(conf):
     global ZMQ_CTX
     conf.register_opts(zmq_opts)
     ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
-

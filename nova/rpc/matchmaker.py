@@ -57,6 +57,11 @@ FLAGS = flags.FLAGS
 FLAGS.register_opts(zmq_opts)
 
 
+class MatchMakerException(exception.NovaException):
+    """Signified a match could not be found."""
+    message = _("Match not found by MatchMaker.")
+
+
 class RewriteRule(object):
     """ 
     Implements lookups. 
