@@ -480,7 +480,7 @@ class Connection(object):
         eventlet.spawn(self.consume)
 
 
-def _send(addr, style, context, topic, msg, timeout=None):
+def _send(conf, addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or conf.rpc_response_timeout
     # timeout_msg is for another host to receive the message
