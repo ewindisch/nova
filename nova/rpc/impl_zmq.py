@@ -27,7 +27,6 @@ import json
 import os
 import pprint
 import random
-import socket
 import string
 import sys
 import types
@@ -187,9 +186,6 @@ class InternalContext(object):
         if not self.msg_waiter:
             self.msg_waiter = ZmqClient('inproc://zmq_reply_queue')
 
-    def get_worker(self, ctx):
-        return socket.gethostname()
-
     def process_reply(self, ctx, msg_id=None, response=None):
         """Process a reply"""
         self.connect()
@@ -197,18 +193,13 @@ class InternalContext(object):
 
     def get_response(self, ctx, proxy, topic, data):
         """Process a curried message and cast the result to topic"""
-        # Internal method
-        # uses internal ctx for safety.
-        if data['method'][0] == '-':
-            # For reply / process_reply
-            method = method[1:]
-            proxy = self
-            if method == 'get_worker':
-                return ConsumerBase.normalize_reply(
-                    self.get_worker(ctx, **data['args']),
-                    ctx.replies
-                )
-            return
+#        # Internal method
+#        # uses internal ctx for safety.
+#        if data['method'][0] == '-':
+#            # For reply / process_reply
+#            method = method[1:]
+#            proxy = self
+#            return
 
         func = getattr(proxy, data['method'])
 

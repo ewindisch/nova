@@ -21,7 +21,6 @@ eventlet.monkey_patch()
 import gettext
 import logging
 import os
-import socket
 import string
 import sys
 import time
