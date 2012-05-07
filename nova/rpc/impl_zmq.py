@@ -83,6 +83,8 @@ def _serialize(data):
     try:
         return json.dumps(data)
     except TypeError:
+        LOG.warn(_("JSON serialization failed."
+                   "Falling back to Pickle."))
         return pickle.dumps(data, version=2)
 
 
