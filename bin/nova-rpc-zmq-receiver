@@ -46,6 +46,7 @@ if os.path.exists(os.path.join(POSSIBLE_TOPDIR, 'nova', '__init__.py')):
 if __name__ == '__main__':
     utils.default_flagfile()
     flags.FLAGS(sys.argv)
+    impl_zmq.register_opts(flags.FLAGS)
     logging.setup()
     utils.monkey_patch()
 
