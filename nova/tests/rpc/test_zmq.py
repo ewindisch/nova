@@ -20,6 +20,7 @@ Unit Tests for remote procedure calls using zeromq
 
 import socket
 
+from nova import flags
 from nova import log as logging
 from nova import test
 from nova.tests.rpc import common
@@ -35,6 +36,14 @@ LOG = logging.getLogger(__name__)
 
 
 class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
+    def setUp(self, topic='test', topic_nested='nested'):
+        self.rpc.register_opts(flags.FLAGS)
+        flags.FLAGS.set_default('rpc_zmq_matchmaker',
+         'mod_matchmaker.MatchMakerLocalhost')
+
+        super(_RpcZmqBaseTestCase, self).setUp(
+              topic=topic, topic_nested=topic_nested)
+
     def tearDown(self):
         if impl_zmq:
             super(_RpcZmqBaseTestCase, self).tearDown()
@@ -49,7 +58,8 @@ class RpcZmqBaseTopicTestCase(_RpcZmqBaseTestCase):
         self.rpc = impl_zmq
 
         if impl_zmq:
-            super(_RpcZmqBaseTestCase, self).setUp()
+            super(RpcZmqDirectTopicTestCase, self).setUp()
+            #super(_RpcZmqBaseTestCase, self).setUp()
 
 
 class RpcZmqDirectTopicTestCase(_RpcZmqBaseTestCase):
@@ -57,6 +67,7 @@ class RpcZmqDirectTopicTestCase(_RpcZmqBaseTestCase):
         self.rpc = impl_zmq
 
         if impl_zmq:
-            super(_RpcZmqBaseTestCase, self).setUp(
+            #super(_RpcZmqBaseTestCase, self).setUp(
+            super(RpcZmqDirectTopicTestCase, self).setUp(
                   topic='test.localhost',
                   topic_nested='nested.localhost')
