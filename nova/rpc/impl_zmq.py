@@ -345,7 +345,7 @@ class ZmqBaseReactor(ConsumerBase):
     def consume(self):
         for k in self.proxies.keys():
             self.threads.append(
-                eventlet.spawn(_consumer, k)
+                eventlet.spawn(self._consumer, k)
             )
 
     def wait(self):
