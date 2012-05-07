@@ -592,10 +592,10 @@ def _multi_send(conf, style, context, topic, msg,
         #cfg.IntOpt('rpc_zmq_start_port', default=9500,
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
         if style.endswith("cast"):
-            eventlet.spawn_n(_send, _addr, _style, _context,
+            eventlet.spawn_n(_send, conf, _addr, _style, _context,
                              _topic, msg, timeout)
         else:
-            return _send(_addr, _style, _context, _topic, msg, timeout)
+            return _send(conf, _addr, _style, _context, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
@@ -655,4 +655,5 @@ def register_opts(conf):
     #NOTE(ewindisch): this is a bad place for the ZMQ_CTX stuff
     global ZMQ_CTX
     conf.register_opts(zmq_opts)
-    ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
+    if not ZMQ_CTX:
+        ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)

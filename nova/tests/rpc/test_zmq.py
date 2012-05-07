@@ -24,6 +24,7 @@ from nova import flags
 from nova import log as logging
 from nova import test
 from nova.tests.rpc import common
+from nova import rpc
 
 try:
     from eventlet.green import zmq
@@ -37,6 +38,11 @@ LOG = logging.getLogger(__name__)
 
 class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
     def setUp(self, topic='test', topic_nested='nested'):
+        if not impl_zmq:
+        	return None
+
+        flags.FLAGS.register_opts(rpc.rpc_opts)
+        self.rpc = impl_zmq
         self.rpc.register_opts(flags.FLAGS)
         flags.FLAGS.set_default('rpc_zmq_matchmaker',
          'mod_matchmaker.MatchMakerLocalhost')
@@ -45,8 +51,9 @@ class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
               topic=topic, topic_nested=topic_nested)
 
     def tearDown(self):
-        if impl_zmq:
-            super(_RpcZmqBaseTestCase, self).tearDown()
+        if not impl_zmq:
+        	return None
+        super(_RpcZmqBaseTestCase, self).tearDown()
 
     @test.skip_if(zmq is None, "Test requires zmq")
     def __getattr__(self, name):
@@ -54,20 +61,11 @@ class _RpcZmqBaseTestCase(common.BaseRpcTestCase):
 
 
 class RpcZmqBaseTopicTestCase(_RpcZmqBaseTestCase):
-    def setUp(self):
-        self.rpc = impl_zmq
-
-        if impl_zmq:
-            super(RpcZmqDirectTopicTestCase, self).setUp()
-            #super(_RpcZmqBaseTestCase, self).setUp()
+    pass
 
 
 class RpcZmqDirectTopicTestCase(_RpcZmqBaseTestCase):
     def setUp(self):
-        self.rpc = impl_zmq
-
-        if impl_zmq:
-            #super(_RpcZmqBaseTestCase, self).setUp(
-            super(RpcZmqDirectTopicTestCase, self).setUp(
-                  topic='test.localhost',
-                  topic_nested='nested.localhost')
+        super(RpcZmqDirectTopicTestCase, self).setUp(
+              topic='test.localhost',
+              topic_nested='nested.localhost')
