@@ -496,9 +496,9 @@ class Connection(object):
         self.reactor.close()
 
     def wait(self):
-        # Greenthread.wait() doesn't seem to
-        # allow other threads to be scheduled.
-        # Thus, we just sleep here.
+        # Greenthread.wait() blocks all threads
+        # which is not what we want, so
+        # we just sleep here.
 
         # TODO(ewindisch): actually wait on
         #                  threads.
@@ -604,8 +604,9 @@ def _multi_send(conf, style, context, topic, msg,
     # Don't stack if we have no matchmaker results
     if len(matches) == 0:
         LOG.debug(_("No matchmaker results. Not casting."))
-        raise mod_matchmaker.MatchMakerException, "No Match from Matchmaker"
-        return [style, topic, ['']]
+        # While not strictly a timeout, callers know how to handle
+        # this exception and a timeout isn't too big a lie.
+        raise nova.rpc.common.Timeout, "No match from matchmaker."
 
     # This supports brokerless fanout (addresses > 1)
     for match in matches:
@@ -657,7 +658,14 @@ def fanout_cast(conf, context, topic, msg):
 
 
 def notify(conf, context, topic, msg):
-    """Send notification event."""
+    """
+    Send notification event.
+    Notifications are sent to topic-priority.
+    This differs from the AMQP drivers which send to topic.priority.
+    """
+    # NOTE(ewindisch): dot-priority in rpc notifier does not
+    # work with our assumptions.
+    topic.replace('.', '-')
     cast(conf, context, topic, msg)
 
 
