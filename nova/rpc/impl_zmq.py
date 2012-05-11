@@ -64,8 +64,10 @@ zmq_opts = [
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
 
     cfg.IntOpt('rpc_zmq_contexts', default=1,
-        help='number of ZeroMQ contexts, defaults to 1')
+        help='number of ZeroMQ contexts, defaults to 1'),
 
+    cfg.StrOpt('rpc_zmq_ipc_dir', default='/var/run/nova',
+        help='directory for holding IPC sockets')
     ]
 
 
@@ -115,6 +117,7 @@ class QueueSocket(object):
         self.subscribe = subscribe
         self.addr = addr
 
+        LOG.debug(_("Connecting to %s"), addr)
         if self.subscribe:
             self.sock.setsockopt(zmq.SUBSCRIBE, subscribe)
 
@@ -433,10 +436,42 @@ class ZmqReactor(ZmqBaseReactor):
                              proxy, ctx, request)
 
 
+class ZmqReplyReactor(ZmqBaseReactor):
+
+    def __init__(self):
+        ipc_dir = '/var/run/nova'
+
+        # Create the necessary directories/files for this service.
+        if not os.path.isdir(ipc_dir):
+            utils.execute('mkdir', '-p', ipc_dir, run_as_root=True)
+            utils.execute('chown', "%s:%s" % (os.getuid(), os.getgid()),
+                          ipc_dir, run_as_root=True)
+            utils.execute('chmod', '750', ipc_dir, run_as_root=True)
+
+        reactor = self  #impl_zmq.ZmqReactor()
+
+        """
+        OUTSIDE -> [consume_in] -> [consume_out][replies_in] -> [replies_out]
+        """
+
+        # Reply service
+        replies_out = 'inproc://zmq_reply_queue'
+        replies_in = "ipc://%s/zmq_reply_queue" % ipc_dir
+        reply_proxy = impl_zmq.InternalContext(None)
+
+        # Subscribe to all topics,
+        # forward over inproc.
+        reactor.register(reply_proxy, replies_in, zmq.SUB, replies_out, zmq.PUB, subscribe='')
+
+        reactor.consume()
+        reactor.wait()
+
+
 class Connection(object):
     """ Manages connections and threads. """
 
-    def __init__(self, isbroker=False):
+    def __init__(self, conf):
+        self.conf = conf
         self.reactor = ZmqReactor()
 
     def create_consumer(self, topic, proxy, fanout, isbroker=False,
@@ -448,10 +483,14 @@ class Connection(object):
         LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
             {'topic': topic})
 
-        #TODO(ewindich): Update to pull from receiver daemon
-        # Register for incoming requests
+        # Receive messages directly on mapped ports.
         #inaddr = TopicManager.listen_addr(topic, TopicManager.REQUESTS)
         #self.reactor.register(proxy, inaddr, zmq.PULL)
+
+        # Receive messages from (local) proxy
+        inaddr = "ipc://%s/zmq_topic_%s" % \
+            (self.conf.rpc_zmq_ipc_dir, topic)
+        self.reactor.register(proxy, inaddr, zmq.PULL)
 
     def close(self):
         self.reactor.close()
@@ -477,7 +516,7 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or conf.rpc_response_timeout
     # timeout_msg is for another host to receive the message
-    timeout_msg = 30
+    timeout_msg = conf.rpc_cast_timeout
 
     conn = ZmqClient(addr)
 
@@ -493,11 +532,10 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
         finally:
             conn.close()
             return
-    elif style != 'call':
+
+    if style != 'call':
         assert False, _("Invalid call style: %s") % style
         return
-
-    # if style == call:
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
@@ -521,7 +559,8 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
 
     # Messages arriving async.
     msg_waiter = QueueSocket(
-        "ipc:///var/run/nova/zmq_reply_queue",
+        #"ipc:///var/run/nova/zmq_reply_queue",
+        "inproc://replies",
         zmq.SUB, subscribe=msg_id, bind=False)
 
     try:
@@ -558,16 +597,6 @@ def _multi_send(conf, style, context, topic, msg,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
-
-    # We memoize matchmaker through this global
-    global matchmaker
-
-    if not matchmaker:
-        module = globals()['mod_matchmaker']
-        # split(conf.rpc_zmq_matchmaker, '.')
-        constructor = getattr(module, 'MatchMakerLocalhost')
-        matchmaker = constructor()
-
     matches = matchmaker.get_workers(style, context, topic)
 
     LOG.debug(_("Sending message(s) to: %s") % matches)
@@ -592,7 +621,7 @@ def _multi_send(conf, style, context, topic, msg,
 
 
 def create_connection(conf, new=True):
-    return Connection()
+    return Connection(conf)
 
 
 def multicall(conf, context, topic, msg, timeout=None):
@@ -645,8 +674,21 @@ def register_opts(conf):
     """
     Registration of options for this driver.
     """
-    #NOTE(ewindisch): this is a bad place for the ZMQ_CTX stuff
+    #NOTE(ewindisch): ZMQ_CTX and matchmaker
+    # are initialized here as this is as good
+    # an initialization method as any.
+	
     global ZMQ_CTX
+    # We memoize matchmaker through this global
+    global matchmaker
+
     conf.register_opts(zmq_opts)
+
+    # Don't re-set, if this method is called twice.
     if not ZMQ_CTX:
         ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
+    if not matchmaker:
+        module = globals()['mod_matchmaker']
+        # split(conf.rpc_zmq_matchmaker, '.')
+        constructor = getattr(module, 'MatchMakerLocalhost')
+        matchmaker = constructor()
