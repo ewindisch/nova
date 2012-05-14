@@ -29,8 +29,8 @@ import zmq
 
 from nova import flags
 from nova import log as logging
+from nova import rpc
 from nova import utils
-
 from nova.rpc import impl_zmq
 
 FLAGS = flags.FLAGS
@@ -46,6 +46,7 @@ if os.path.exists(os.path.join(POSSIBLE_TOPDIR, 'nova', '__init__.py')):
 if __name__ == '__main__':
     utils.default_flagfile()
     flags.FLAGS(sys.argv)
+    FLAGS.register_opts(rpc.rpc_opts)
     impl_zmq.register_opts(flags.FLAGS)
     logging.setup()
     utils.monkey_patch()
@@ -59,10 +60,15 @@ if __name__ == '__main__':
                       ipc_dir, run_as_root=True)
         utils.execute('chmod', '750', ipc_dir, run_as_root=True)
 
-    reactor = impl_zmq.ZmqReactor()
+    reactor = impl_zmq.ZmqProxy(flags.FLAGS)
 
     """
-    OUTSIDE -> [consume_in] -> [consume_out][replies_in] -> [replies_out]
+    [client:PUSH]
+    -(tcp)-> [consume_in:PULL]
+    -(reactor)->  [consume_out:PUSH]
+    -(reactor)-> [replies_in:PULL]
+    -(inproc)-> [replies_out:PUB]
+    -(ipc)-> [consumer:SUB]
     """
 
     # Reply service
@@ -70,7 +76,7 @@ if __name__ == '__main__':
     replies_out = "ipc://%s/zmq_reply_queue" % ipc_dir
     reply_proxy = impl_zmq.InternalContext(None)
 
-    reactor.register(reply_proxy, replies_in, zmq.PULL, replies_out, zmq.PUB)
+    #reactor.register(reply_proxy, replies_in, zmq.PULL, replies_out, zmq.PUB)
 
     # Consumer service (feeds replies) - incoming path of inbound
     # messages
@@ -78,11 +84,11 @@ if __name__ == '__main__':
         (FLAGS.rpc_zmq_bind_address,
          FLAGS.rpc_zmq_start_port)
     consume_out = replies_in
-    consumption_proxy = impl_zmq.InternalContext(None)
+    consumption_proxy = reply_proxy
 
+    print "Registering consumption on %s" % FLAGS.rpc_zmq_start_port
     reactor.register(consumption_proxy,
-                     consume_in, zmq.PULL,
-                     consume_out, zmq.PUSH, out_bind=False)
+                     consume_in, zmq.PULL, out_bind=True)
 
-    reactor.consume()
+    reactor.consume_in_thread()
     reactor.wait()

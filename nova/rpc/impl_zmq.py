@@ -24,6 +24,7 @@ import cPickle as pickle
 import hashlib
 import itertools
 import json
+import logging
 import os
 import pprint
 import random
@@ -33,6 +34,8 @@ import types
 import traceback
 import uuid
 
+# These eventlets can be safely loaded later
+from eventlet import greenpool
 from eventlet.green import zmq
 from eventlet import timeout as eventlet_timeout
 
@@ -46,7 +49,8 @@ from nova.rpc import matchmaker as mod_matchmaker
 
 pformat = pprint.pformat
 Timeout = eventlet_timeout.Timeout
-LOG = rpc_common.LOG
+#LOG = rpc_common.LOG
+LOG = logging.getLogger(__name__)
 RemoteError = rpc_common.RemoteError
 
 zmq_opts = [
@@ -103,37 +107,63 @@ def _deserialize(data):
         return pickle.loads(data)
 
 
-class QueueSocket(object):
+class ZmqSocket(object):
     """
     A tiny wrapper around ZeroMQ to simplify the send/recv protocol
     and connection management.
+
+    Can be used as a Context (supports the 'with' statement).
     """
 
-    def __init__(self, addr, zmq_type, bind=True, recv=True, send=True,
-                 subscribe=None):
+    def __init__(self, addr, zmq_type, bind=True, subscribe=None):
         self.sock = ZMQ_CTX.socket(zmq_type)
-        self.can_multi_send = send
-        self.can_recv = recv
-        self.subscribe = subscribe
         self.addr = addr
+        self.type = zmq_type
+        self.subscriptions = []
 
-        LOG.debug(_("Connecting to %s"), addr)
-        if self.subscribe:
-            self.sock.setsockopt(zmq.SUBSCRIBE, subscribe)
+        # Support failures on sending/receiving on wrong socket type.
+        self.can_recv = zmq_type in (zmq.PULL, zmq.SUB)
+        self.can_send = zmq_type in (zmq.PUSH, zmq.PUB)
+
+        do_sub = {
+        	list: subscribe,
+        	str:  [subscribe],
+        	type(None): []
+        }[type(subscribe)]
+
+        for f in do_sub:
+            self.subscribe(f)
+
+        LOG.debug(_("Connecting to %s with %s"), addr, self.socket_s())
+        print _("Connecting to %s with %s"), addr, self.socket_s()
 
         if bind:
             self.sock.bind(addr)
         else:
             self.sock.connect(addr)
 
+    def socket_s(self):
+        """Get socket type as string"""
+        t_enum=('PUSH', 'PULL', 'PUB', 'SUB', 'REP', 'REQ', 'ROUTER',
+                'DEALER')
+        return dict(map(lambda t: (getattr(zmq, t), t), t_enum))[self.type]
+
+    def subscribe(self, msg_filter):
+        #assert None, "subscribing msg_filter=%s" % msg_filter
+        self.sock.setsockopt(zmq.SUBSCRIBE, msg_filter)
+        self.subscriptions.append(msg_filter)
+        #assert None, "subscribing msg_filter=%s" % msg_filter
+
     def close(self):
         # We must unsubscribe, or we'll leak descriptors.
-        if self.subscribe:
-            self.sock.setsockopt(zmq.UNSUBSCRIBE, self.subscribe)
+        if len(self.subscriptions) > 0:
+            for f in self.subscriptions:
+                self.sock.setsockopt(zmq.UNSUBSCRIBE, f)
 
         # Linger -1 prevents lost/dropped messages
         if not self.sock.closed:
             self.sock.close(linger=-1)
+
         self.sock = None
 
     def recv(self):
@@ -141,7 +171,14 @@ class QueueSocket(object):
         return self.sock.recv_multipart()
 
     def send(self, data):
+        assert self.can_send, _("You cannot send on this socket.")
         self.sock.send_multipart(data)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.close()
 
 
 class ZmqClient(object):
@@ -149,7 +186,7 @@ class ZmqClient(object):
 
     def __init__(self, addr, socket_type=zmq.PUSH, bind=False,
             recv=False):
-        self.outq = QueueSocket(addr, socket_type, bind=bind, recv=recv)
+        self.outq = ZmqSocket(addr, socket_type, bind=bind, recv=recv)
 
     def cast(self, msg_id, topic, data):
         self.outq.send([str(msg_id), str(topic), str('cast'),
@@ -157,6 +194,12 @@ class ZmqClient(object):
 
     def close(self):
         self.outq.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.close()
 
 
 class RpcContext(context.RequestContext):
@@ -193,6 +236,7 @@ class InternalContext(object):
 
     def process_reply(self, ctx, msg_id=None, response=None):
         """Process a reply"""
+        print "Processing reply"
         self.connect()
         self.msg_waiter.cast(str(msg_id), str('zmq_replies'), response)
 
@@ -232,6 +276,7 @@ class InternalContext(object):
             self.get_response(child_ctx, proxy, topic, msg[1]),
             ctx.replies)
 
+        print "Sending reply"
         _multi_send("cast", ctx, topic, {
             'method': '-process_reply',
             'args': {
@@ -306,51 +351,68 @@ class ZmqBaseReactor(ConsumerBase):
      for RoundRobin requests.
     """
 
-    def __init__(self):
+    def __init__(self, conf):
         super(ZmqBaseReactor, self).__init__()
 
+        self.conf = conf
         self.mapping = {}
         self.proxies = {}
         self.topic_map = {}
         self.threads = []
         self.sockets = []
+        self.sock_type = {}
+        self.subscribe = {}
+        self.publish = {}
+
+        self.pool = greenpool.GreenPool(conf.rpc_thread_pool_size)
 
     def register(self, proxy, in_addr, zmq_type_in, out_addr=None,
                  zmq_type_out=None, in_bind=True, out_bind=True,
-                 subscribe=None):
+                 subscribe=None, publish=None):
 
+        print "Registering reactor"
         LOG.debug(_("Registering reactor"))
 
+        assert (zmq_type_in in (zmq.PULL, zmq.SUB)), "Bad input socktype"
+
         # Items push in.
-        inq = QueueSocket(in_addr, zmq_type_in, bind=in_bind,
+        inq = ZmqSocket(in_addr, zmq_type_in, bind=in_bind,
                           subscribe=subscribe)
 
         self.proxies[inq] = proxy
+        self.publish[inq] = publish
+        self.sock_type[inq] = zmq_type_in
         self.sockets.append(inq)
 
+        print "In reactor registered"
         LOG.debug(_("In reactor registered"))
 
         if not out_addr:
-            return None
+            print "No out addr"
+            return
+
+        assert (zmq_type_out in (zmq.PUSH, zmq.PUB)), "Bad output socktype"
 
         # Items push out.
-        outq = QueueSocket(out_addr, zmq_type_out,
+        outq = ZmqSocket(out_addr, zmq_type_out,
                            bind=out_bind)
 
         self.mapping[inq] = outq
         self.mapping[outq] = inq
+        self.sock_type[outq] = zmq_type_out
         self.sockets.append(outq)
 
+        print "Out reactor registered"
         LOG.debug(_("Out reactor registered"))
 
-    def _consumer(self, sock):
-        while True:
-            self._procsocket(sock)
+    def consume_in_thread(self):
+        def _consume(sock):
+            print "Consuming socket"
+            self.consume(sock)
 
-    def consume(self):
         for k in self.proxies.keys():
             self.threads.append(
-                eventlet.spawn(self._consumer, k)
+                self.pool.spawn(_consume, k)
             )
 
     def wait(self):
@@ -372,30 +434,41 @@ class ZmqProxy(ZmqBaseReactor):
     IPC sockets.
     """
 
-    def __init__(self):
-        super(ZmqProxy, self).__init__()
+    def __init__(self, conf):
+        self.topic_proxy = {}
+        super(ZmqProxy, self).__init__(conf)
 
-    def _procsocket(self, sock):
+    def consume(self, sock):
+        ipc_dir = self.conf.rpc_zmq_ipc_dir
+
         #TODO(ewindisch): use zero-copy (i.e. references, not copying)
         data = sock.recv()
 
+        sock_type = self.sock_type[sock]
+
         LOG.debug(_("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data)))
+
+        print _("CONSUMER GOT %s") % \
+                    ' '.join(map(pformat, data))
 
         msg_id, topic, style, in_msg = data
 
         LOG.debug(_("DATA: %s") % \
                     ' '.join(map(pformat, in_msg)))
+
+        print _("DATA: %s") % \
+                    ' '.join(map(pformat, in_msg))
         ctx, request = _deserialize(in_msg)
         ctx = RpcContext.unmarshal(ctx)
 
         if not topic in self.topic_proxy:
-            # Items push out.
-            outq = QueueSocket("ipc://var/run/nova/%s" % topic,
-                               zmq.PUSH, bind=True)
+            subscribe=(None, msg_id)[sock_type == zmq.SUB]
+            outq = ZmqSocket("ipc://%s/zmq_topic_%s" % (ipc_dir, topic),
+                               sock_type, subscribe=subscribe, bind=True)
             self.topic_proxy[topic] = outq
             self.sockets.append(outq)
-            LOG.debug(_("Out reactor registered"))
+            print "Relayed data to %s : %s" % (topic, subscribe)
 
         LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
             'data': data})
@@ -409,37 +482,45 @@ class ZmqReactor(ZmqBaseReactor):
     used as a 1:1 proxy
     """
 
-    def __init__(self):
-        super(ZmqReactor, self).__init__()
+    def __init__(self, conf):
+        super(ZmqReactor, self).__init__(conf)
 
-    def _procsocket(self, sock):
+    def consume(self, sock):
         #TODO(ewindisch): use zero-copy (i.e. references, not copying)
+        print "CONSUMER GOT SOCKET: #1"
         data = sock.recv()
+        print "CONSUMEr RECEIVED DATA: %s" % data
         if sock in self.mapping:
             LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
                 'data': data})
+            print _("ROUTER RELAY-OUT %(data)s") % {
+                'data': data}
             self.mapping[sock].send(data)
-        else:
-            LOG.debug(_("CONSUMER GOT %s") % \
-                        ' '.join(map(pformat, data)))
+            return
 
-            msg_id, topic, style, in_msg = data
+        LOG.debug(_("CONSUMER GOT %s") % \
+                    ' '.join(map(pformat, data)))
+        print _("CONSUMER GOT %s") % \
+                    ' '.join(map(pformat, data))
 
-            LOG.debug(_("DATA: %s") % \
-                        ' '.join(map(pformat, in_msg)))
-            ctx, request = _deserialize(in_msg)
-            ctx = RpcContext.unmarshal(ctx)
 
-            proxy = self.proxies[sock]
+        msg_id, topic, style, in_msg = data
 
-            eventlet.spawn_n(self.process, style, topic,
-                             proxy, ctx, request)
+        LOG.debug(_("DATA: %s") % \
+                    ' '.join(map(pformat, in_msg)))
+        ctx, request = _deserialize(in_msg)
+        ctx = RpcContext.unmarshal(ctx)
+
+        proxy = self.proxies[sock]
+
+        self.pool.spawn_n(self.process, style, topic,
+                          proxy, ctx, request)
 
 
 class ZmqReplyReactor(ZmqBaseReactor):
 
-    def __init__(self):
-        ipc_dir = '/var/run/nova'
+    def __init__(self, conf):
+        ipc_dir = conf.rpc_zmq_ipc_dir
 
         # Create the necessary directories/files for this service.
         if not os.path.isdir(ipc_dir):
@@ -448,49 +529,66 @@ class ZmqReplyReactor(ZmqBaseReactor):
                           ipc_dir, run_as_root=True)
             utils.execute('chmod', '750', ipc_dir, run_as_root=True)
 
-        reactor = self  #impl_zmq.ZmqReactor()
+        reactor = self  # impl_zmq.ZmqReactor()
 
         """
         OUTSIDE -> [consume_in] -> [consume_out][replies_in] -> [replies_out]
         """
 
         # Reply service
-        replies_out = 'inproc://zmq_reply_queue'
-        replies_in = "ipc://%s/zmq_reply_queue" % ipc_dir
+        replies_out = 'inproc://replies'
+        replies_in = "ipc://%s/zmq_topic_zmq_replies" % ipc_dir
         reply_proxy = impl_zmq.InternalContext(None)
 
         # Subscribe to all topics,
         # forward over inproc.
-        reactor.register(reply_proxy, replies_in, zmq.SUB, replies_out, zmq.PUB, subscribe='')
+        reactor.register(reply_proxy, replies_in, zmq.SUB,
+                         replies_out, zmq.PUB, subscribe='')
 
         reactor.consume()
         reactor.wait()
 
 
-class Connection(object):
+class Connection(nova.rpc.common.Connection):
     """ Manages connections and threads. """
 
     def __init__(self, conf):
         self.conf = conf
-        self.reactor = ZmqReactor()
+        self.reactor = ZmqReactor(conf)
 
-    def create_consumer(self, topic, proxy, fanout, isbroker=False,
-                        replysvc=False):
-        if '.' in topic:
-            LOG.debug(_("Not listening on bare topic."))
-            return 1
+        print "Creating reply consumer"
+        self.create_consumer('zmq_replies',
+            InternalContext(None), '')
+
+    def create_consumer(self, topic, proxy, fanout=False):
+                        #subscribe=None, isbroker=False,
+                        #replysvc=False):
+        # Default, don't subscribe.
+        subscribe = None
+        sock_type=zmq.PULL
 
         LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
             {'topic': topic})
 
-        # Receive messages directly on mapped ports.
-        #inaddr = TopicManager.listen_addr(topic, TopicManager.REQUESTS)
-        #self.reactor.register(proxy, inaddr, zmq.PULL)
+        print "Create Consumer RR for topic (%s)" % topic
 
         # Receive messages from (local) proxy
         inaddr = "ipc://%s/zmq_topic_%s" % \
             (self.conf.rpc_zmq_ipc_dir, topic)
-        self.reactor.register(proxy, inaddr, zmq.PULL)
+
+        # Subscription scenarios
+        if type(fanout) == str:
+            subscribe = fanout
+            sock_type=zmq.SUB
+        elif fanout:
+            subscribe = ''
+            sock_type=zmq.SUB
+
+        print "Consumer",
+        print ['PULL', 'SUB'][sock_type==zmq.SUB]
+
+        self.reactor.register(proxy, inaddr, sock_type,
+                              subscribe=subscribe)
 
     def close(self):
         self.reactor.close()
@@ -504,29 +602,30 @@ class Connection(object):
         #                  threads.
         while True:
             eventlet.sleep(28800)
-
-    def consume(self, limit=None):
-        self.reactor.consume()
+        #self.reactor.wait()
 
     def consume_in_thread(self):
-        eventlet.spawn(self.consume)
+        self.reactor.consume_in_thread()
 
 
 def _send(conf, addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or conf.rpc_response_timeout
+    print "configured timeout is: %s" % timeout_response
     # timeout_msg is for another host to receive the message
-    timeout_msg = conf.rpc_cast_timeout
+    timeout_cast = conf.rpc_cast_timeout
 
-    conn = ZmqClient(addr)
+    #conn = ZmqClient(addr)
+    #with ZmqClient(addr) as conn:
 
     if style == 'cast':
         try:
             # Casts should be quick, don't use standard time-out.
-            with Timeout(timeout_msg, exception=nova.rpc.common.Timeout) as t:
+            with Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
                 payload = [RpcContext.marshal(context), msg]
                 # assumes cast can't return an exception
-                return conn.cast(topic, topic, payload)
+                with ZmqClient(addr) as conn:
+                    return conn.cast(topic, topic, payload)
         except Timeout:  # Ignore the timeouts
             pass
         finally:
@@ -545,6 +644,7 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
     # Replies always come into the reply service.
     reply_topic = "zmq_replies.%s" % hostname
 
+    print "Creating payload"
     # Curry the original request into a reply method.
     orig_payload = [RpcContext.marshal(context), msg]
     payload = [RpcContext.marshal(context), {
@@ -557,24 +657,40 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
         }
     }]
 
+    print "Creating queue socket for reply waiter"
     # Messages arriving async.
-    msg_waiter = QueueSocket(
-        #"ipc:///var/run/nova/zmq_reply_queue",
-        "inproc://replies",
-        zmq.SUB, subscribe=msg_id, bind=False)
+    #msg_waiter = ZmqSocket(
+    #    "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
+    #    #"inproc://replies",
+    #    zmq.SUB, subscribe=msg_id, bind=False)
 
-    try:
-        with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
+    with ZmqSocket(
+        "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
+        #"inproc://replies",
+        zmq.SUB, subscribe=msg_id, bind=False) as msg_waiter:
+
+    #try:
+        timeout_response = 5
+        timeout_cast = 5
+        with Timeout(timeout_response,
+                     exception=nova.rpc.common.Timeout) as t:
             # We timeout no more than 30 seconds for the cast itself.
-            with Timeout(timeout_msg, exception=nova.rpc.common.Timeout) as t1:
-                conn.cast(msg_id, topic, payload)
+            with Timeout(timeout_cast,
+                         exception=nova.rpc.common.Timeout) as t1:
+                print "Sending cast"
+                with ZmqClient(addr) as conn:
+                    conn.cast(msg_id, topic, payload)
 
+            print "Cast sent; Waiting reply"
             # Blocks until receives reply
             responses = _deserialize(msg_waiter.recv()[-1])
-    finally:
-        conn.close()
-        msg_waiter.close()
-        del msg_waiter
+#    finally:
+#        print "Closing connection"
+#        #conn.close()
+#        msg_waiter.close()
+#        del msg_waiter
+
+    print "Unpacking response"
 
     # It seems we don't need to do all of the following,
     # but perhaps it would be useful for multicall?
@@ -597,28 +713,27 @@ def _multi_send(conf, style, context, topic, msg,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
-    matches = matchmaker.get_workers(style, context, topic)
+    queues = matchmaker.queues(style, context, topic)
 
-    LOG.debug(_("Sending message(s) to: %s") % matches)
+    LOG.debug(_("Sending message(s) to: %s") % queues)
 
     # Don't stack if we have no matchmaker results
-    if len(matches) == 0:
+    if len(queues) == 0:
         LOG.debug(_("No matchmaker results. Not casting."))
         # While not strictly a timeout, callers know how to handle
         # this exception and a timeout isn't too big a lie.
         raise nova.rpc.common.Timeout, "No match from matchmaker."
 
     # This supports brokerless fanout (addresses > 1)
-    for match in matches:
-        (_style, _context, _topic, ip_addr) = match
-
-        #cfg.IntOpt('rpc_zmq_start_port', default=9500,
+    for queue in queues:
+        (_style, _context, _topic, ip_addr) = queue
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
+
         if style.endswith("cast"):
             eventlet.spawn_n(_send, conf, _addr, _style, _context,
                              _topic, msg, timeout)
-        else:
-            return _send(conf, _addr, _style, _context, _topic, msg, timeout)
+            return
+        return _send(conf, _addr, _style, _context, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
@@ -685,9 +800,9 @@ def register_opts(conf):
     #NOTE(ewindisch): ZMQ_CTX and matchmaker
     # are initialized here as this is as good
     # an initialization method as any.
-	
+
+    # We memoize through these globals
     global ZMQ_CTX
-    # We memoize matchmaker through this global
     global matchmaker
 
     conf.register_opts(zmq_opts)

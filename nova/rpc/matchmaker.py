@@ -54,12 +54,17 @@ FLAGS = flags.FLAGS
 FLAGS.register_opts(matchmaker_opts)
 
 
+"""
+The MatchMaker classes should except a Topic or Fanout exchange key and
+return keys for direct exchanges, per (approximate) AMQP parlance.
+"""
+
 class MatchMakerException(exception.NovaException):
     """Signified a match could not be found."""
     message = _("Match not found by MatchMaker.")
 
 
-class RewriteRule(object):
+class Exchange(object):
     """
     Implements lookups.
     Subclass this to support hashtables, dns, etc.
@@ -71,9 +76,9 @@ class RewriteRule(object):
         raise NotImplementedError()
 
 
-class RewriteCond(object):
+class Binding(object):
     """
-    A condition on which to perform a lookup.
+    A binding on which to perform a lookup.
     """
     def __init__(self):
         pass
@@ -92,22 +97,22 @@ class MatchMakerBase(object):
 
     def __init__(self):
         # Array of tuples. Index [2] toggles negation
-        self.conditions = []
+        self.bindings = []
 
-    def add_condition(self, condition, rule, last=False):
-        self.conditions.append((condition, rule, False, last))
+    def add_binding(self, binding, rule, last=False):
+        self.bindings.append((binding, rule, False, last))
 
-    def add_negate_condition(self, condition, rule, last=False):
-        self.conditions.append((condition, rule, True, last))
+    def add_negate_binding(self, binding, rule, last=False):
+        self.bindings.append((binding, rule, True, last))
 
-    def get_workers(self, style, context, topic):
+    def queues(self, style, context, topic):
         workers = []
-        for (condition, rule, bit, last) in self.conditions:
-            #x = condition.run(context, topic)
+        for (binding, exchange, bit, last) in self.bindings:
+            #x = binding.run(context, topic)
             #if (bit and not x) or x:
-            #   workers.extend(rule.run(style, context, topic))
-            with condition:
-                workers.extend(rule.run(style, context, topic))
+            #   workers.extend(exchange.run(style, context, topic))
+            with binding:
+                workers.extend(exchange.run(style, context, topic))
 
             if len(workers) >= limit:
                 return workers[0:limit]
@@ -116,7 +121,7 @@ class MatchMakerBase(object):
 
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
-class RulePass(RewriteRule):
+class PassExchange(Exchange):
     def run(self, style, context, topic):
         return (style, context, topic)
 
@@ -167,7 +172,15 @@ def condfanout(style, context, topic):
         yield
 
 
-class ConditionBareTopic(RewriteCond):
+class DirectTopicBinding(Binding):
+    #def _test(
+    def __enter__(self, style, context, topic):
+        if '.' in topic:
+            return True
+        return False
+
+
+class BareTopicBinding(Binding):
     #def _test(
     def __enter__(self, style, context, topic):
         if '.' not in topic:
@@ -177,19 +190,19 @@ class ConditionBareTopic(RewriteCond):
 
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
-class ConditionFanout(RewriteCond):
+class FanoutBinding(Binding):
     def __enter__(self, style, context, topic):
         if topic.startswith('fanout'):
             return True
         return False
 
 
-class RingRule(RewriteRule):
+class RingExchange(Exchange):
     """
     Match Maker where hosts are loaded from a static file
     """
     def __init__(self):
-        super(RingRule, self).__init__()
+        super(RingExchange, self).__init__()
 
         fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
         self.ring = json.load(fh)
@@ -199,25 +212,35 @@ class RingRule(RewriteRule):
         fh.close()
         LOG.debug(_("RING:\n%s"), self.ring0)
 
+    def next(self):
+        return next(self.ring0[topic])
 
-class NextTopicRule(RingRule):
+    def _has(self, topic):
+        if topic in self.ring0:
+        	return True
+        return False
+
+
+class RoundRobinRingExchange(RingExchange):
+    """A Topic Exchange"""
     def __init__(self):
-        super(NextTopicRule, self).__init__()
+        super(RoundRobinRingExchange, self).__init__()
 
     def run(self, context, topic):
-        if topic not in self.ring0:
+        if not self._has(topic):
             LOG.debug(
                 _("No key defining hosts for topic '%(topic)', "
                   "see ringfile") % topic
             )
             return []
-        host = next(self.ring0[topic])
+        host = next(self)
         return [topic + '.' + host]
 
 
-class AllTopicRule(RingRule):
+class FanoutRingExchange(RingExchange):
+    """Fanout Exchange"""
     def __init__(self):
-        super(AllTopicRule, self).__init__()
+        super(FanoutRingExchange, self).__init__()
 
     def run(self, context, topic):
         return map(lambda x: (topic + '.' + x), self.ring[topic])
@@ -225,38 +248,48 @@ class AllTopicRule(RingRule):
 
 class MatchMakerRing(MatchMakerBase):
     """
-        Match Maker where hosts are loaded from a static file
+    Match Maker where hosts are loaded from a static file
     """
     def __init__(self):
         super(MatchMakerRing, self).__init__()  # *args, **kwargs)
 
         # round-robin
-        ##self.add_condition(ConditionBareTopic(), NextTopicRule(), last=True)
-        #self.add_condition(condbaretopic, NextTopicRule(), last=True)
+        ##self.add_binding(BareTopicBinding(),
+        #                  RoundRobinRingExchange(), last=True)
+        #self.add_binding(condbaretopic, RoundRobinRingExchange(), last=True)
+
+        self.add_binding(DirectTopicBinding(), RoundRobinRingExchange())
 
         # fanout messaging
-        self.add_condition(
-            [ConditionBareTopic(), ConditionFanout()],
-            AllTopicRule()
-        )
+        self.add_binding(BareTopicBinding(), FanoutRingExchange())
+        self.add_binding(FanoutBinding(), FanoutRingExchange())
 
-        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
-        self.ring = json.load(fh)
-        self.ring0 = {}
-        for k in self.ring.keys():
-            self.ring0[k] = itertools.cycle(self.ring[k])
-        fh.close()
-        LOG.debug(_("RING:\n%s"), self.ring0)
+#        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
+#        self.ring = json.load(fh)
+#        self.ring0 = {}
+#        for k in self.ring.keys():
+#            self.ring0[k] = itertools.cycle(self.ring[k])
+#        fh.close()
+#        LOG.debug(_("RING:\n%s"), self.ring0)
+#
+#    def queues(self, style, context, topic):
+#        #raise Exception, "Set Sail for Fail"
+#        if topic not in self.ring:
+#            return []
+#        if style.startswith("fanout"):
+#            return self.ring[topic]
+#        if '.' not in topic:
+#            return self.ring0[topic].next()
+#        return [(style, context, topic), ]
 
-    def get_workers(self, style, context, topic):
-        #raise Exception, "Set Sail for Fail"
-        if topic not in self.ring:
-            return []
-        if style.startswith("fanout"):
-            return self.ring[topic]
-        if '.' not in topic:
-            return self.ring0[topic].next()
-        return [(style, context, topic), ]
+
+class LocalhostExchange(Exchange):
+    """Exchange where all direct topics are local"""
+    def __init__(self):
+        super(Exchange, self).__init__()
+
+    def run(self, context, topic):
+        return [topic + '.' + 'locahost']
 
 
 class MatchMakerLocalhost(MatchMakerBase):
@@ -266,8 +299,17 @@ class MatchMakerLocalhost(MatchMakerBase):
     """
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
+        #self.add_binding(Binding(), RoundRobinRingExchange())
+        self.add_binding(BareTopicBinding(), RoundRobinRingExchange())
+        self.add_binding(BareTopicBinding(), FanoutRingExchange())
+        self.add_binding(FanoutBinding(), FanoutRingExchange())
 
-    def get_workers(self, style, context, topic):
+#    def queues(self, style, context, topic):
+#        x=super(MatchMakerLocalhost, self).queues(style, context, topic)
+#        print "Queues: %s" % x
+#        return x
+
+    def queues(self, style, context, topic):
         if '.' not in topic:
             return [(style, context, topic + '.localhost', 'localhost')]
         return [(style, context, topic, 'localhost'), ]
@@ -281,5 +323,5 @@ class MatchMakerPassthrough(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
 
-    def get_workers(self, style, context, topic):
+    def queues(self, style, context, topic):
         return [(style, context, topic, topic), ]
