@@ -184,9 +184,8 @@ class ZmqSocket(object):
 class ZmqClient(object):
     """Client for ZMQ sockets"""
 
-    def __init__(self, addr, socket_type=zmq.PUSH, bind=False,
-            recv=False):
-        self.outq = ZmqSocket(addr, socket_type, bind=bind, recv=recv)
+    def __init__(self, addr, socket_type=zmq.PUSH, bind=False):
+        self.outq = ZmqSocket(addr, socket_type, bind=bind)
 
     def cast(self, msg_id, topic, data):
         self.outq.send([str(msg_id), str(topic), str('cast'),
@@ -611,30 +610,20 @@ class Connection(nova.rpc.common.Connection):
 def _send(conf, addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or conf.rpc_response_timeout
-    print "configured timeout is: %s" % timeout_response
     # timeout_msg is for another host to receive the message
     timeout_cast = conf.rpc_cast_timeout
 
-    #conn = ZmqClient(addr)
-    #with ZmqClient(addr) as conn:
-
     if style == 'cast':
-        try:
-            # Casts should be quick, don't use standard time-out.
-            with Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
-                payload = [RpcContext.marshal(context), msg]
-                # assumes cast can't return an exception
-                with ZmqClient(addr) as conn:
-                    return conn.cast(topic, topic, payload)
-        except Timeout:  # Ignore the timeouts
-            pass
-        finally:
-            conn.close()
-            return
+        with ZmqClient(addr) as conn, \
+             Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
+
+            payload = [RpcContext.marshal(context), msg]
+
+            # assumes cast can't return an exception
+            return conn.cast(topic, topic, payload)
 
     if style != 'call':
         assert False, _("Invalid call style: %s") % style
-        return
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
@@ -658,37 +647,31 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
     }]
 
     print "Creating queue socket for reply waiter"
+
     # Messages arriving async.
-    #msg_waiter = ZmqSocket(
-    #    "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
-    #    #"inproc://replies",
-    #    zmq.SUB, subscribe=msg_id, bind=False)
+    with \
+        ZmqSocket(
+            "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
+            zmq.SUB, subscribe=msg_id, bind=False
+        ) as msg_waiter, \
+        Timeout(
+            timeout_response,
+            exception=nova.rpc.common.Timeout
+        ) as t_call:
 
-    with ZmqSocket(
-        "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
-        #"inproc://replies",
-        zmq.SUB, subscribe=msg_id, bind=False) as msg_waiter:
+            with \
+                 ZmqClient(addr) as conn, \
+                 Timeout(
+                    timeout_cast,
+                    exception=nova.rpc.common.Timeout
+                 ) as t_cast:
 
-    #try:
-        timeout_response = 5
-        timeout_cast = 5
-        with Timeout(timeout_response,
-                     exception=nova.rpc.common.Timeout) as t:
-            # We timeout no more than 30 seconds for the cast itself.
-            with Timeout(timeout_cast,
-                         exception=nova.rpc.common.Timeout) as t1:
                 print "Sending cast"
-                with ZmqClient(addr) as conn:
-                    conn.cast(msg_id, topic, payload)
+                conn.cast(msg_id, topic, payload)
 
             print "Cast sent; Waiting reply"
             # Blocks until receives reply
             responses = _deserialize(msg_waiter.recv()[-1])
-#    finally:
-#        print "Closing connection"
-#        #conn.close()
-#        msg_waiter.close()
-#        del msg_waiter
 
     print "Unpacking response"
 
