@@ -241,14 +241,6 @@ class InternalContext(object):
 
     def get_response(self, ctx, proxy, topic, data):
         """Process a curried message and cast the result to topic"""
-#        # Internal method
-#        # uses internal ctx for safety.
-#        if data['method'][0] == '-':
-#            # For reply / process_reply
-#            method = method[1:]
-#            proxy = self
-#            return
-
         func = getattr(proxy, data['method'])
 
         try:
