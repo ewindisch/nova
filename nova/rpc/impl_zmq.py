@@ -261,7 +261,6 @@ class InternalContext(object):
             # ignore these since they are just from shutdowns
             pass
         except Exception:
-            #return ConsumerBase.build_exception(sys.exc_info())
             return {'exc':
                     rpc_common.serialize_remote_exception(sys.exc_info())}
 
@@ -300,18 +299,6 @@ class ConsumerBase(object):
         else:
             return [result]
 
-#    @classmethod
-#    def build_exception(self, failure):
-#        """
-#        A list is always returned, but an exception is
-#        a dict so that the caller can differentiate exception
-#        responses from data responses.
-#        """
-#        tb = traceback.format_exception(*failure)
-#        failure = {'exc': (failure[0].__name__,
-#                            str(failure[1]), tb)}
-#        return failure
-
     def process(self, style, target, proxy, ctx, data):
         # Method starting with - are
         # processed internally. (non-valid method name)
@@ -336,7 +323,6 @@ class ConsumerBase(object):
         try:
             func = getattr(iproxy, data['method'])
         except AttributeError:
-            #return ConsumerBase.build_exception(sys.exc_info())
             return rpc_common.serialize_remote_exception(sys.exc_info())
 
         func(ctx, **data['args'])
