@@ -585,23 +585,20 @@ class Connection(nova.rpc.common.Connection):
         self.reactor.consume_in_thread()
 
 
-def _send(conf, addr, style, context, topic, msg, timeout=None):
+def _cast(conf, addr, context, msg_id, topic, msg, timeout=None):
+    timeout_cast = timeout or conf.rpc_cast_timeout
+    with ZmqClient(addr) as conn, \
+         Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
+
+        payload = [RpcContext.marshal(context), msg]
+
+        # assumes cast can't return an exception
+        conn.cast(msg_id, topic, payload)
+
+
+def _call(conf, addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or conf.rpc_response_timeout
-    # timeout_msg is for another host to receive the message
-    timeout_cast = conf.rpc_cast_timeout
-
-    if style == 'cast':
-        with ZmqClient(addr) as conn, \
-             Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
-
-            payload = [RpcContext.marshal(context), msg]
-
-            # assumes cast can't return an exception
-            return conn.cast(topic, topic, payload)
-
-    if style != 'call':
-        assert False, _("Invalid call style: %s") % style
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
@@ -614,7 +611,8 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
     print "Creating payload"
     # Curry the original request into a reply method.
     orig_payload = [RpcContext.marshal(context), msg]
-    payload = [RpcContext.marshal(context), {
+    #payload = [RpcContext.marshal(context), {
+    payload = {
         'method': '-reply',
         'args': {
             'msg_id': msg_id,
@@ -622,7 +620,7 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
             'topic': reply_topic,
             'msg': orig_payload
         }
-    }]
+    } # ]
 
     print "Creating queue socket for reply waiter"
 
@@ -633,19 +631,11 @@ def _send(conf, addr, style, context, topic, msg, timeout=None):
             zmq.SUB, subscribe=msg_id, bind=False
         ) as msg_waiter, \
         Timeout(
-            timeout_response,
-            exception=nova.rpc.common.Timeout
+            timeout_response, exception=nova.rpc.common.Timeout
         ) as t_call:
-
-            with \
-                 ZmqClient(addr) as conn, \
-                 Timeout(
-                    timeout_cast,
-                    exception=nova.rpc.common.Timeout
-                 ) as t_cast:
-
-                print "Sending cast"
-                conn.cast(msg_id, topic, payload)
+            print "Sending cast"
+            #conn.cast(msg_id, topic, payload)
+            _cast(conf, addr, context, msg_id, topic, payload)
 
             print "Cast sent; Waiting reply"
             # Blocks until receives reply
@@ -691,10 +681,10 @@ def _multi_send(conf, style, context, topic, msg,
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
 
         if style.endswith("cast"):
-            eventlet.spawn_n(_send, conf, _addr, _style, _context,
-                             _topic, msg, timeout)
+            eventlet.spawn_n(_cast, conf, _addr, _style, _context,
+                             _topic, _topic, msg)
             return
-        return _send(conf, _addr, _style, _context, _topic, msg, timeout)
+        return _call(conf, _addr, _style, _context, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
