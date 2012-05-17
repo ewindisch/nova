@@ -627,7 +627,11 @@ def _multi_send(conf, style, context, topic, msg,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
+    LOG.debug(_("%(style)s %(msg)s") % {'style': style, 
+        'msg': ' '.join(map(pformat, (topic, msg)))})
+
     queues = matchmaker.queues(style, context, topic)
+
 
     LOG.debug(_("Sending message(s) to: %s") % queues)
 
@@ -656,8 +660,6 @@ def create_connection(conf, new=True):
 
 def multicall(conf, context, topic, msg, timeout=None):
     """ Multiple calls """
-    LOG.debug(_("RR MULTICALL %(msg)s") % {'msg': ' '.join(map(pformat,
-        (topic, msg)))})
     style, target, data = _multi_send(conf, "call", context, str(topic), msg,
         timeout=timeout)
     return data
@@ -665,8 +667,6 @@ def multicall(conf, context, topic, msg, timeout=None):
 
 def call(conf, context, topic, msg, timeout=None):
     """ Send a message, expect a response """
-    LOG.debug(_("RR CALL %(msg)s") % {'msg': ' '.join(map(pformat,
-        (topic, msg)))})
     style, target, data = _multi_send(conf, "call", context, str(topic), msg,
         timeout=timeout)
     return data[-1]
@@ -674,15 +674,11 @@ def call(conf, context, topic, msg, timeout=None):
 
 def cast(conf, context, topic, msg):
     """ Send a message expecting no reply """
-    LOG.debug(_("RR CAST %(msg)s") % {'msg': ' '.join(map(pformat,
-        (topic, msg)))})
     _multi_send(conf, "cast", context, str(topic), msg)
 
 
 def fanout_cast(conf, context, topic, msg):
     """ Send a message to all listening and expect no reply """
-    LOG.debug(_("FANOUT CAST %(msg)s") % {'msg': ' '.join(map(pformat,
-        (topic, msg)))})
     _multi_send("fanout-cast", context, str(topic), msg)
 
 
@@ -700,11 +696,9 @@ def notify(conf, context, topic, msg):
 
 def cleanup():
     """Clean up resources in use by implementation."""
-
-    # NOTE(ewindisch): All cleanup should be handled by
-    # Connection.close().  Managing the connections
-    # through a class variable/method would be ugly & broken.
-    pass
+    matchmaker = None
+    zmq_term(ZMQ_CTX)
+    ZMQ_CTX = None
 
 
 def register_opts(conf):
