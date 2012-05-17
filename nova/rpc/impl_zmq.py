@@ -681,7 +681,7 @@ def cast(conf, context, topic, msg):
 
 def fanout_cast(conf, context, topic, msg):
     """ Send a message to all listening and expect no reply """
-    _multi_send("fanout-cast", context, str(topic), msg)
+    _multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
 
 
 def notify(conf, context, topic, msg):
