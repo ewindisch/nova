@@ -420,36 +420,32 @@ class ZmqProxy(ZmqBaseReactor):
 
         #TODO(ewindisch): use zero-copy (i.e. references, not copying)
         data = sock.recv()
-
-        sock_type = self.sock_type[sock]
+        msg_id, topic, style, in_msg = data
+        topic = topic.split('.')[0]
 
         LOG.debug(_("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data)))
-
         print _("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data))
 
-        msg_id, topic, style, in_msg = data
-
-        LOG.debug(_("DATA: %s") % \
-                    ' '.join(map(pformat, in_msg)))
-
-        print _("DATA: %s") % \
-                    ' '.join(map(pformat, in_msg))
         ctx, request = _deserialize(in_msg)
         ctx = RpcContext.unmarshal(ctx)
 
         if not topic in self.topic_proxy:
-            subscribe=(None, msg_id)[sock_type == zmq.SUB]
+            subscribe=(None, msg_id)[topic == 'zmq_replies']
+            sock_type=(zmq.PUSH, zmq.PUB)[bool(subscribe)]
             outq = ZmqSocket("ipc://%s/zmq_topic_%s" % (ipc_dir, topic),
                                sock_type, subscribe=subscribe, bind=True)
             self.topic_proxy[topic] = outq
             self.sockets.append(outq)
-            print "Relayed data to %s : %s" % (topic, subscribe)
+            print "Created topic proxy for topic: %s" % topic
+
+        print "Relaying data to %s : %s" % (topic, subscribe)
 
         LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
             'data': data})
         self.topic_proxy[topic].send(data)
+        print "Relayed data to %s : %s" % (topic, subscribe)
 
 
 class ZmqReactor(ZmqBaseReactor):
@@ -466,7 +462,7 @@ class ZmqReactor(ZmqBaseReactor):
         #TODO(ewindisch): use zero-copy (i.e. references, not copying)
         print "CONSUMER GOT SOCKET: #1"
         data = sock.recv()
-        print "CONSUMEr RECEIVED DATA: %s" % data
+        print "CONSUMER RECEIVED DATA: %s" % data
         if sock in self.mapping:
             LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
                 'data': data})
@@ -494,38 +490,6 @@ class ZmqReactor(ZmqBaseReactor):
                           proxy, ctx, request)
 
 
-class ZmqReplyReactor(ZmqBaseReactor):
-
-    def __init__(self, conf):
-        ipc_dir = conf.rpc_zmq_ipc_dir
-
-        # Create the necessary directories/files for this service.
-        if not os.path.isdir(ipc_dir):
-            utils.execute('mkdir', '-p', ipc_dir, run_as_root=True)
-            utils.execute('chown', "%s:%s" % (os.getuid(), os.getgid()),
-                          ipc_dir, run_as_root=True)
-            utils.execute('chmod', '750', ipc_dir, run_as_root=True)
-
-        reactor = self  # impl_zmq.ZmqReactor()
-
-        """
-        OUTSIDE -> [consume_in] -> [consume_out][replies_in] -> [replies_out]
-        """
-
-        # Reply service
-        replies_out = 'inproc://replies'
-        replies_in = "ipc://%s/zmq_topic_zmq_replies" % ipc_dir
-        reply_proxy = impl_zmq.InternalContext(None)
-
-        # Subscribe to all topics,
-        # forward over inproc.
-        reactor.register(reply_proxy, replies_in, zmq.SUB,
-                         replies_out, zmq.PUB, subscribe='')
-
-        reactor.consume()
-        reactor.wait()
-
-
 class Connection(nova.rpc.common.Connection):
     """ Manages connections and threads. """
 
@@ -534,8 +498,8 @@ class Connection(nova.rpc.common.Connection):
         self.reactor = ZmqReactor(conf)
 
         print "Creating reply consumer"
-        self.create_consumer('zmq_replies',
-            InternalContext(None), '')
+        #self.create_consumer('zmq_replies',
+        #    InternalContext(None), '')
 
     def create_consumer(self, topic, proxy, fanout=False):
                         #subscribe=None, isbroker=False,
@@ -602,11 +566,10 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
-    hostname = conf.host
     base_topic = topic.split('.', 1)[0]
 
     # Replies always come into the reply service.
-    reply_topic = "zmq_replies.%s" % hostname
+    reply_topic = "zmq_replies.%s" % conf.host
 
     print "Creating payload"
     # Curry the original request into a reply method.
