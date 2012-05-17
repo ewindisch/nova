@@ -334,7 +334,6 @@ class ConsumerBase(object):
             return rpc_common.serialize_remote_exception(sys.exc_info())
 
         func(ctx, **data['args'])
-        return None
 
 
 class ZmqBaseReactor(ConsumerBase):
@@ -590,13 +589,14 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
 
     print "Creating payload"
     # Curry the original request into a reply method.
+    mcontext = RpcContext.marshal(context)
     payload = {
         'method': '-reply',
         'args': {
             'msg_id': msg_id,
-            'context': RpcContext.marshal(context),
+            'context': mcontext,
             'topic': reply_topic,
-            'msg': [RpcContext.marshal(context), msg]
+            'msg': [mcontext, msg]
         }
     }
 
