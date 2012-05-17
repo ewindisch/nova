@@ -74,6 +74,7 @@ zmq_opts = [
     ]
 
 
+FLAGS = None
 ZMQ_CTX = None
 matchmaker = None
 
@@ -503,8 +504,6 @@ class Connection(nova.rpc.common.Connection):
         #    InternalContext(None), '')
 
     def create_consumer(self, topic, proxy, fanout=False):
-                        #subscribe=None, isbroker=False,
-                        #replysvc=False):
         # Default, don't subscribe.
         subscribe = None
         sock_type=zmq.PULL
@@ -620,13 +619,14 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
     return style, topic, all_data[-1]
 
 
-def _multi_send(conf, style, context, topic, msg,
+def _multi_send(style, context, topic, msg,
      socket_type=None, timeout=None):
     """
     Wraps the sending of messages,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
+    conf = FLAGS
     LOG.info(_("%(style)s %(msg)s") % {'style': style,
         'msg': ' '.join(map(pformat, (topic, msg)))})
 
@@ -656,23 +656,23 @@ def create_connection(conf, new=True):
     return Connection(conf)
 
 
-def multicall(conf, context, topic, msg, timeout=None):
+def multicall(context, topic, msg, timeout=None):
     """ Multiple calls """
-    style, target, data = _multi_send(conf, "call", context, str(topic), msg,
+    style, target, data = _multi_send("call", context, str(topic), msg,
         timeout=timeout)
     return data
 
 
 def call(conf, context, topic, msg, timeout=None):
     """ Send a message, expect a response """
-    style, target, data = _multi_send(conf, "call", context, str(topic), msg,
+    style, target, data = _multi_send("call", context, str(topic), msg,
         timeout=timeout)
     return data[-1]
 
 
-def cast(conf, context, topic, msg):
+def cast(context, topic, msg):
     """ Send a message expecting no reply """
-    _multi_send(conf, "cast", context, str(topic), msg)
+    _multi_send("cast", context, str(topic), msg)
 
 
 def fanout_cast(conf, context, topic, msg):
@@ -680,7 +680,7 @@ def fanout_cast(conf, context, topic, msg):
     _multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
 
 
-def notify(conf, context, topic, msg):
+def notify(context, topic, msg):
     """
     Send notification event.
     Notifications are sent to topic-priority.
@@ -689,7 +689,7 @@ def notify(conf, context, topic, msg):
     # NOTE(ewindisch): dot-priority in rpc notifier does not
     # work with our assumptions.
     topic.replace('.', '-')
-    cast(conf, context, topic, msg)
+    cast(context, topic, msg)
 
 
 def cleanup():
@@ -710,8 +710,10 @@ def register_opts(conf):
     # We memoize through these globals
     global ZMQ_CTX
     global matchmaker
+    global FLAGS
 
     conf.register_opts(zmq_opts)
+    FLAGS = conf
 
     # Don't re-set, if this method is called twice.
     if not ZMQ_CTX:
