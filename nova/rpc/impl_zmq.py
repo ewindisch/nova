@@ -125,6 +125,7 @@ class ZmqSocket(object):
         self.can_recv = zmq_type in (zmq.PULL, zmq.SUB)
         self.can_send = zmq_type in (zmq.PUSH, zmq.PUB)
 
+        # Support list, str, & None for subscribe arg (cast to list)
         do_sub = {
         	list: subscribe,
         	str:  [subscribe],
@@ -159,6 +160,7 @@ class ZmqSocket(object):
         if len(self.subscriptions) > 0:
             for f in self.subscriptions:
                 self.sock.setsockopt(zmq.UNSUBSCRIBE, f)
+            self.subscriptions = []
 
         # Linger -1 prevents lost/dropped messages
         if not self.sock.closed:
@@ -497,7 +499,7 @@ class Connection(nova.rpc.common.Connection):
         self.conf = conf
         self.reactor = ZmqReactor(conf)
 
-        print "Creating reply consumer"
+        #print "Creating reply consumer"
         #self.create_consumer('zmq_replies',
         #    InternalContext(None), '')
 
@@ -627,7 +629,7 @@ def _multi_send(conf, style, context, topic, msg,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
-    LOG.debug(_("%(style)s %(msg)s") % {'style': style, 
+    LOG.debug(_("%(style)s %(msg)s") % {'style': style,
         'msg': ' '.join(map(pformat, (topic, msg)))})
 
     queues = matchmaker.queues(style, context, topic)
