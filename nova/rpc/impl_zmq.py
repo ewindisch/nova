@@ -133,10 +133,9 @@ class ZmqSocket(object):
         for f in do_sub:
             self.subscribe(f)
 
-        LOG.debug(_("Connecting to %s with %s"), addr, self.socket_s())
-        print _("Connecting to %s with %s"), addr, self.socket_s()
-        print "-> Subscribed to %s" % subscribe
-        print "-> bind: %s" % bind
+        LOG.info(_("Connecting to %s with %s"), addr, self.socket_s())
+        LOG.info("-> Subscribed to %s" % subscribe)
+        LOG.info("-> bind: %s" % bind)
 
         if bind:
             self.sock.bind(addr)
@@ -150,7 +149,7 @@ class ZmqSocket(object):
         return dict(map(lambda t: (getattr(zmq, t), t), t_enum))[self.type]
 
     def subscribe(self, msg_filter):
-        print "Subscribing to %s" % msg_filter
+        LOG.info("Subscribing to %s" % msg_filter)
         #assert None, "subscribing msg_filter=%s" % msg_filter
         self.sock.setsockopt(zmq.SUBSCRIBE, msg_filter)
         self.subscriptions.append(msg_filter)
@@ -281,7 +280,7 @@ class InternalContext(object):
             self.get_response(child_ctx, proxy, topic, msg[1]),
             ctx.replies)
 
-        print "Sending reply"
+        LOG.info("Sending reply")
         _multi_send("cast", ctx, topic, {
             'method': '-process_reply',
             'args': {
@@ -362,8 +361,7 @@ class ZmqBaseReactor(ConsumerBase):
                  zmq_type_out=None, in_bind=True, out_bind=True,
                  subscribe=None, publish=None):
 
-        print "Registering reactor"
-        LOG.debug(_("Registering reactor"))
+        LOG.info(_("Registering reactor"))
 
         assert (zmq_type_in in (zmq.PULL, zmq.SUB)), "Bad input socktype"
 
@@ -376,11 +374,10 @@ class ZmqBaseReactor(ConsumerBase):
         self.sock_type[inq] = zmq_type_in
         self.sockets.append(inq)
 
-        print "In reactor registered"
-        LOG.debug(_("In reactor registered"))
+        LOG.info(_("In reactor registered"))
 
         if not out_addr:
-            print "No out addr"
+            LOG.info("No out addr")
             return
 
         assert (zmq_type_out in (zmq.PUSH, zmq.PUB)), "Bad output socktype"
@@ -394,12 +391,11 @@ class ZmqBaseReactor(ConsumerBase):
         self.sock_type[outq] = zmq_type_out
         self.sockets.append(outq)
 
-        print "Out reactor registered"
-        LOG.debug(_("Out reactor registered"))
+        LOG.info(_("Out reactor registered"))
 
     def consume_in_thread(self):
         def _consume(sock):
-            print "Consuming socket"
+            LOG.info("Consuming socket")
             while True:
                 self.consume(sock)
 
@@ -439,10 +435,8 @@ class ZmqProxy(ZmqBaseReactor):
         msg_id, topic, style, in_msg = data
         topic = topic.split('.')[0]
 
-        LOG.debug(_("CONSUMER GOT %s") % \
+        LOG.info(_("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data)))
-        print _("CONSUMER GOT %s") % \
-                    ' '.join(map(pformat, data))
 
         ctx, request = _deserialize(in_msg)
         ctx = RpcContext.unmarshal(ctx)
@@ -454,15 +448,11 @@ class ZmqProxy(ZmqBaseReactor):
                                sock_type, subscribe=subscribe, bind=True)
             self.topic_proxy[topic] = outq
             self.sockets.append(outq)
-            print "Created topic proxy for topic: %s" % topic
+            LOG.info(_("Created topic proxy: %s" % topic))
 
-        print "Relaying data to %s" % topic
-
-        LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
-            'data': data})
+        LOG.info(_("ROUTER RELAY-OUT START %(data)s") % { 'data': data})
         self.topic_proxy[topic].send(data)
-        print "Relayed data to %s" % topic
-
+        LOG.info(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % { 'data': data})
 
 class ZmqReactor(ZmqBaseReactor):
     """
@@ -476,27 +466,22 @@ class ZmqReactor(ZmqBaseReactor):
 
     def consume(self, sock):
         #TODO(ewindisch): use zero-copy (i.e. references, not copying)
-        print "CONSUMER GOT SOCKET: #1"
+        LOG.info("CONSUMER GOT SOCKET: #1")
         data = sock.recv()
-        print "CONSUMER RECEIVED DATA: %s" % data
+        LOG.info("CONSUMER RECEIVED DATA: %s" % data)
         if sock in self.mapping:
-            LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
+            LOG.info(_("ROUTER RELAY-OUT %(data)s") % {
                 'data': data})
-            print _("ROUTER RELAY-OUT %(data)s") % {
-                'data': data}
             self.mapping[sock].send(data)
             return
 
-        LOG.debug(_("CONSUMER GOT %s") % \
-                    ' '.join(map(pformat, data)))
-        print _("CONSUMER GOT %s") % \
-                    ' '.join(map(pformat, data))
-
-
         msg_id, topic, style, in_msg = data
 
-        LOG.debug(_("DATA: %s") % \
+        LOG.info(_("CONSUMER GOT %s") % \
+                    ' '.join(map(pformat, data)))
+        LOG.info(_("DATA: %s") % \
                     ' '.join(map(pformat, in_msg)))
+
         ctx, request = _deserialize(in_msg)
         ctx = RpcContext.unmarshal(ctx)
 
@@ -524,10 +509,10 @@ class Connection(nova.rpc.common.Connection):
         subscribe = None
         sock_type=zmq.PULL
 
-        LOG.debug(_("Create Consumer RR for topic (%(topic)s)") %
+        LOG.info(_("Create Consumer RR for topic (%(topic)s)") %
             {'topic': topic})
 
-        print "Create Consumer RR for topic (%s)" % topic
+        LOG.info("Create Consumer RR for topic (%s)" % topic)
 
         # Receive messages from (local) proxy
         inaddr = "ipc://%s/zmq_topic_%s" % \
@@ -541,8 +526,7 @@ class Connection(nova.rpc.common.Connection):
             subscribe = ''
             sock_type=zmq.SUB
 
-        print "Consumer",
-        print ['PULL', 'SUB'][sock_type==zmq.SUB]
+        LOG.info("Consumer-%s" % ['PULL', 'SUB'][sock_type==zmq.SUB])
 
         self.reactor.register(proxy, inaddr, sock_type,
                               subscribe=subscribe, in_bind=False)
@@ -587,7 +571,7 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
     # Replies always come into the reply service.
     reply_topic = "zmq_replies.%s" % conf.host
 
-    print "Creating payload"
+    LOG.info("Creating payload")
     # Curry the original request into a reply method.
     mcontext = RpcContext.marshal(context)
     payload = {
@@ -600,7 +584,7 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
         }
     }
 
-    print "Creating queue socket for reply waiter"
+    LOG.info("Creating queue socket for reply waiter")
 
     # Messages arriving async.
     # TODO(ewindisch): have reply consumer with dynamic subscription mgmt
@@ -612,15 +596,15 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
         Timeout(
             timeout_response, exception=nova.rpc.common.Timeout
         ) as t_call:
-            print "Sending cast"
+            LOG.info("Sending cast")
             #conn.cast(msg_id, topic, payload)
             _cast(conf, addr, context, msg_id, topic, payload)
 
-            print "Cast sent; Waiting reply"
+            LOG.info("Cast sent; Waiting reply")
             # Blocks until receives reply
             responses = _deserialize(msg_waiter.recv()[-1])
 
-    print "Unpacking response"
+    LOG.info("Unpacking response")
 
     # It seems we don't need to do all of the following,
     # but perhaps it would be useful for multicall?
@@ -643,20 +627,15 @@ def _multi_send(conf, style, context, topic, msg,
     dispatches to the matchmaker and sends
     message to all relevant hosts.
     """
-    LOG.debug(_("%(style)s %(msg)s") % {'style': style,
+    LOG.info(_("%(style)s %(msg)s") % {'style': style,
         'msg': ' '.join(map(pformat, (topic, msg)))})
-    print _("%(style)s %(msg)s") % {'style': style,
-        'msg': ' '.join(map(pformat, (topic, msg)))}
-
 
     queues = matchmaker.queues(style, context, topic)
-
-
-    LOG.debug(_("Sending message(s) to: %s") % queues)
+    LOG.info(_("Sending message(s) to: %s") % queues)
 
     # Don't stack if we have no matchmaker results
     if len(queues) == 0:
-        LOG.debug(_("No matchmaker results. Not casting."))
+        LOG.info(_("No matchmaker results. Not casting."))
         # While not strictly a timeout, callers know how to handle
         # this exception and a timeout isn't too big a lie.
         raise nova.rpc.common.Timeout, "No match from matchmaker."
