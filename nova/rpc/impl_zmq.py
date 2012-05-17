@@ -49,8 +49,7 @@ from nova.rpc import matchmaker as mod_matchmaker
 
 pformat = pprint.pformat
 Timeout = eventlet_timeout.Timeout
-#LOG = rpc_common.LOG
-LOG = logging.getLogger(__name__)
+LOG = rpc_common.LOG
 RemoteError = rpc_common.RemoteError
 
 zmq_opts = [
@@ -77,7 +76,6 @@ zmq_opts = [
 
 ZMQ_CTX = None
 matchmaker = None
-
 
 def _serialize(data):
     """
@@ -152,6 +150,7 @@ class ZmqSocket(object):
         return dict(map(lambda t: (getattr(zmq, t), t), t_enum))[self.type]
 
     def subscribe(self, msg_filter):
+        print "Subscribing to %s" % msg_filter
         #assert None, "subscribing msg_filter=%s" % msg_filter
         self.sock.setsockopt(zmq.SUBSCRIBE, msg_filter)
         self.subscriptions.append(msg_filter)
@@ -161,7 +160,7 @@ class ZmqSocket(object):
         if msg_filter not in self.subscriptions:
         	return None
         self.sock.setsockopt(zmq.UNSUBSCRIBE, msg_filter)
-        self.subscriptions.pop(msg_filter)
+        self.subscriptions.remove(msg_filter)
 
     def close(self):
         # We must unsubscribe, or we'll leak descriptors.
@@ -458,12 +457,12 @@ class ZmqProxy(ZmqBaseReactor):
             self.sockets.append(outq)
             print "Created topic proxy for topic: %s" % topic
 
-        print "Relaying data to %s : %s" % (topic, subscribe)
+        print "Relaying data to %s" % topic
 
         LOG.debug(_("ROUTER RELAY-OUT %(data)s") % {
             'data': data})
         self.topic_proxy[topic].send(data)
-        print "Relayed data to %s : %s" % (topic, subscribe)
+        print "Relayed data to %s" % topic
 
 
 class ZmqReactor(ZmqBaseReactor):
@@ -591,21 +590,20 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
 
     print "Creating payload"
     # Curry the original request into a reply method.
-    orig_payload = [RpcContext.marshal(context), msg]
-    #payload = [RpcContext.marshal(context), {
     payload = {
         'method': '-reply',
         'args': {
             'msg_id': msg_id,
             'context': RpcContext.marshal(context),
             'topic': reply_topic,
-            'msg': orig_payload
+            'msg': [RpcContext.marshal(context), msg]
         }
-    } # ]
+    }
 
     print "Creating queue socket for reply waiter"
 
     # Messages arriving async.
+    # TODO(ewindisch): have reply consumer with dynamic subscription mgmt
     with \
         ZmqSocket(
             "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
@@ -647,6 +645,9 @@ def _multi_send(conf, style, context, topic, msg,
     """
     LOG.debug(_("%(style)s %(msg)s") % {'style': style,
         'msg': ' '.join(map(pformat, (topic, msg)))})
+    print _("%(style)s %(msg)s") % {'style': style,
+        'msg': ' '.join(map(pformat, (topic, msg)))}
+
 
     queues = matchmaker.queues(style, context, topic)
 
