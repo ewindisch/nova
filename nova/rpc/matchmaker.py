@@ -45,7 +45,7 @@ contextmanager = contextlib.contextmanager
 
 matchmaker_opts = [
     # Matchmaker ring file
-    cfg.StrOpt('rpc_zmq_matchmaker_ringfile',
+    cfg.StrOpt('matchmaker_ringfile',
         default='/etc/nova/matchmaker_ring.json',
         help='Matchmaker ring file (JSON)'),
 ]
@@ -83,14 +83,6 @@ class Binding(object):
     def __init__(self):
         pass
 
-    def _test(self, context, topic):
-        raise NotImplementedError()
-
-    def run(self, context, topic):
-        if self._test(context, topic):
-            return True
-        return False
-
 
 class MatchMakerBase(object):
     """Match Maker Base Class"""
@@ -126,54 +118,7 @@ class PassExchange(Exchange):
         return (style, context, topic)
 
 
-class PrettyContext(object):
-    def __init__(self, method):
-        self.meth = method
-        #pass
-
-    def __enter__(self):
-        try:
-            return self.meth.next()
-        except StopIteration:
-            return
-        #return self
-
-    def __exit__(self, type, value, tb):
-        try:
-            return self.meth.next()
-        except StopIteration:
-            return True
-
-
-def prettycontext(fun):
-    def helper(*args, **kwargs):
-        return(PrettyContext(fun(*args, **kwargs)))
-    return helper
-
-
-## Get a host on bare topics.
-## Not needed for ROUTER_PUB which is always brokered.
-#@prettycontext  #contextmanager
-#def condbaretopic(style, context, topic):
-#    if '.' not in topic:
-#    	print "foo!"
-#        yield
-#
-#with condbaretopic('a.a','b.d','cd'):
-#    print "hello world"
-#
-#with condbaretopic('a.a','b.d','c.d'):
-#    print "hello world"
-
-
-@prettycontext
-def condfanout(style, context, topic):
-    if topic.startswith('fanout'):
-        yield
-
-
 class DirectTopicBinding(Binding):
-    #def _test(
     def __enter__(self, style, context, topic):
         if '.' in topic:
             return True
@@ -181,7 +126,6 @@ class DirectTopicBinding(Binding):
 
 
 class BareTopicBinding(Binding):
-    #def _test(
     def __enter__(self, style, context, topic):
         if '.' not in topic:
             return True
@@ -192,7 +136,7 @@ class BareTopicBinding(Binding):
 # Not needed for ROUTER_PUB which is always brokered.
 class FanoutBinding(Binding):
     def __enter__(self, style, context, topic):
-        if topic.startswith('fanout'):
+        if topic.startswith('fanout.'):
             return True
         return False
 
@@ -204,7 +148,7 @@ class RingExchange(Exchange):
     def __init__(self):
         super(RingExchange, self).__init__()
 
-        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
+        fh = open(FLAGS.matchmaker_ringfile, 'r')
         self.ring = json.load(fh)
         self.ring0 = {}
         for k in self.ring.keys():
@@ -253,34 +197,14 @@ class MatchMakerRing(MatchMakerBase):
     def __init__(self):
         super(MatchMakerRing, self).__init__()  # *args, **kwargs)
 
-        # round-robin
-        ##self.add_binding(BareTopicBinding(),
-        #                  RoundRobinRingExchange(), last=True)
-        #self.add_binding(condbaretopic, RoundRobinRingExchange(), last=True)
-
+        # Direct-to-host
         self.add_binding(DirectTopicBinding(), RoundRobinRingExchange())
 
-        # fanout messaging
-        self.add_binding(BareTopicBinding(), FanoutRingExchange())
-        self.add_binding(FanoutBinding(), FanoutRingExchange())
+        # Standard RR
+        self.add_binding(BareTopicBinding(), RoundrobinRingExchange())
 
-#        fh = open(FLAGS.rpc_zmq_matchmaker_ringfile, 'r')
-#        self.ring = json.load(fh)
-#        self.ring0 = {}
-#        for k in self.ring.keys():
-#            self.ring0[k] = itertools.cycle(self.ring[k])
-#        fh.close()
-#        LOG.debug(_("RING:\n%s"), self.ring0)
-#
-#    def queues(self, style, context, topic):
-#        #raise Exception, "Set Sail for Fail"
-#        if topic not in self.ring:
-#            return []
-#        if style.startswith("fanout"):
-#            return self.ring[topic]
-#        if '.' not in topic:
-#            return self.ring0[topic].next()
-#        return [(style, context, topic), ]
+        # fanout messaging
+        self.add_binding(FanoutBinding(), FanoutRingExchange())
 
 
 class LocalhostExchange(Exchange):
