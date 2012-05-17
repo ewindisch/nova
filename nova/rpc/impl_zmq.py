@@ -282,7 +282,7 @@ class InternalContext(object):
             ctx.replies)
 
         LOG.info("Sending reply")
-        _multi_send("cast", ctx, topic, {
+        _multi_send('cast', ctx, topic, {
             'method': '-process_reply',
             'args': {
                 'msg_id': msg_id,
@@ -438,6 +438,11 @@ class ZmqProxy(ZmqBaseReactor):
 
         LOG.info(_("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data)))
+        if topic == 'zmq_replies':
+        	LOG.info("REPLY-PROCESSING")
+        	LOG.info("REPLY-PROCESSING")
+        	LOG.info("REPLY-PROCESSING")
+        	LOG.info("REPLY-PROCESSING")
 
         ctx, request = _deserialize(in_msg)
         ctx = RpcContext.unmarshal(ctx)
@@ -454,6 +459,11 @@ class ZmqProxy(ZmqBaseReactor):
         LOG.info(_("ROUTER RELAY-OUT START %(data)s") % { 'data': data})
         self.topic_proxy[topic].send(data)
         LOG.info(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % { 'data': data})
+
+        #TODO(ewindisch): do this better
+        if msg_id != topic:
+        	del self.topic_proxy[topic]
+
 
 class ZmqReactor(ZmqBaseReactor):
     """
@@ -548,8 +558,8 @@ class Connection(nova.rpc.common.Connection):
         self.reactor.consume_in_thread()
 
 
-def _cast(conf, addr, context, msg_id, topic, msg, timeout=None):
-    timeout_cast = timeout or conf.rpc_cast_timeout
+def _cast(addr, context, msg_id, topic, msg, timeout=None):
+    timeout_cast = timeout or FLAGS.rpc_cast_timeout
     with ZmqClient(addr) as conn, \
          Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
 
@@ -559,16 +569,16 @@ def _cast(conf, addr, context, msg_id, topic, msg, timeout=None):
         conn.cast(msg_id, topic, payload)
 
 
-def _call(conf, addr, style, context, topic, msg, timeout=None):
+def _call(addr, style, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
-    timeout_response = timeout or conf.rpc_response_timeout
+    timeout_response = timeout or FLAGS.rpc_response_timeout
 
     # The msg_id is used to track replies.
     msg_id = str(uuid.uuid4().hex)
     base_topic = topic.split('.', 1)[0]
 
     # Replies always come into the reply service.
-    reply_topic = "zmq_replies.%s" % conf.host
+    reply_topic = "zmq_replies.%s" % FLAGS.host
 
     LOG.info("Creating payload")
     # Curry the original request into a reply method.
@@ -589,7 +599,7 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
     # TODO(ewindisch): have reply consumer with dynamic subscription mgmt
     with \
         ZmqSocket(
-            "ipc://%s/zmq_topic_zmq_replies" % conf.rpc_zmq_ipc_dir,
+            "ipc://%s/zmq_topic_zmq_replies" % FLAGS.rpc_zmq_ipc_dir,
             zmq.SUB, subscribe=msg_id, bind=False
         ) as msg_waiter, \
         Timeout(
@@ -597,7 +607,7 @@ def _call(conf, addr, style, context, topic, msg, timeout=None):
         ) as t_call:
             LOG.info("Sending cast")
             #conn.cast(msg_id, topic, payload)
-            _cast(conf, addr, context, msg_id, topic, payload)
+            _cast(addr, context, msg_id, topic, payload)
 
             LOG.info("Cast sent; Waiting reply")
             # Blocks until receives reply
@@ -646,10 +656,10 @@ def _multi_send(style, context, topic, msg,
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
 
         if style.endswith("cast"):
-            eventlet.spawn_n(_cast, conf, _addr, _style, _context,
+            eventlet.spawn_n(_cast, _addr, _style, _context,
                              _topic, _topic, msg)
             return
-        return _call(conf, _addr, _style, _context, _topic, msg, timeout)
+        return _call(_addr, _style, _context, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
