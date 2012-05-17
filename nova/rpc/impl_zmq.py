@@ -137,6 +137,8 @@ class ZmqSocket(object):
 
         LOG.debug(_("Connecting to %s with %s"), addr, self.socket_s())
         print _("Connecting to %s with %s"), addr, self.socket_s()
+        print "-> Subscribed to %s" % subscribe
+        print "-> bind: %s" % bind
 
         if bind:
             self.sock.bind(addr)
@@ -154,6 +156,12 @@ class ZmqSocket(object):
         self.sock.setsockopt(zmq.SUBSCRIBE, msg_filter)
         self.subscriptions.append(msg_filter)
         #assert None, "subscribing msg_filter=%s" % msg_filter
+
+    def unsubscribe(self, msg_filter):
+        if msg_filter not in self.subscriptions:
+        	return None
+        self.sock.setsockopt(zmq.UNSUBSCRIBE, msg_filter)
+        self.subscriptions.pop(msg_filter)
 
     def close(self):
         # We must unsubscribe, or we'll leak descriptors.
@@ -179,8 +187,11 @@ class ZmqSocket(object):
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, exc_type, value, traceback):
         self.close()
+        #if exc_type is not None:
+        #	raise exc_type
+        #self.close()
 
 
 class ZmqClient(object):
@@ -201,6 +212,9 @@ class ZmqClient(object):
 
     def __exit__(self, type, value, traceback):
         self.close()
+        #if exc_type is not None:
+        #	raise exc_type
+        #self.close()
 
 
 class RpcContext(context.RequestContext):
@@ -286,6 +300,7 @@ class ConsumerBase(object):
 
     @classmethod
     def normalize_reply(self, result, replies):
+        #NOTE(ewindisch): re-evaluate and document this method.
         if isinstance(result, types.GeneratorType):
             return list(result)
         elif replies:
@@ -387,7 +402,8 @@ class ZmqBaseReactor(ConsumerBase):
     def consume_in_thread(self):
         def _consume(sock):
             print "Consuming socket"
-            self.consume(sock)
+            while True:
+                self.consume(sock)
 
         for k in self.proxies.keys():
             self.threads.append(
@@ -531,7 +547,7 @@ class Connection(nova.rpc.common.Connection):
         print ['PULL', 'SUB'][sock_type==zmq.SUB]
 
         self.reactor.register(proxy, inaddr, sock_type,
-                              subscribe=subscribe)
+                              subscribe=subscribe, in_bind=False)
 
     def close(self):
         self.reactor.close()
