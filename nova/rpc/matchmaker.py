@@ -187,6 +187,8 @@ class FanoutRingExchange(RingExchange):
         super(FanoutRingExchange, self).__init__()
 
     def run(self, context, topic):
+        # Assume starts with "fanout."
+        topic = topic.split('fanout.')[1:][0]
         return map(lambda x: (topic + '.' + x), self.ring[topic])
 
 
