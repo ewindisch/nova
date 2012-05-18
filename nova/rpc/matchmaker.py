@@ -83,6 +83,9 @@ class Binding(object):
     def __init__(self):
         pass
 
+    def test(self, context, topic):
+        raise NotImplementedError()
+
 
 class MatchMakerBase(object):
     """Match Maker Base Class"""
@@ -99,15 +102,16 @@ class MatchMakerBase(object):
 
     def queues(self, context, topic):
         workers = []
+
+        # bit is for negate bindings - if we choose to implement it.
+        # last stops processing rules if this matches.
         for (binding, exchange, bit, last) in self.bindings:
-            #x = binding.run(context, topic)
-            #if (bit and not x) or x:
-            #   workers.extend(exchange.run(style, context, topic))
-            with binding:
+        	if binding.test():
                 workers.extend(exchange.run(context, topic))
 
-            if len(workers) >= limit:
-                return workers[0:limit]
+            # Support a limit?
+            #if len(workers) >= limit:
+            #    return workers[0:limit]
         return workers
 
 
@@ -119,14 +123,14 @@ class PassExchange(Exchange):
 
 
 class DirectTopicBinding(Binding):
-    def __enter__(self, context, topic):
+    def test(self, context, topic):
         if '.' in topic:
             return True
         return False
 
 
 class BareTopicBinding(Binding):
-    def __enter__(self, context, topic):
+    def test(self, context, topic):
         if '.' not in topic:
             return True
         return False
@@ -135,7 +139,7 @@ class BareTopicBinding(Binding):
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class FanoutBinding(Binding):
-    def __enter__(self, context, topic):
+    def test(self, context, topic):
         if topic.startswith('fanout.'):
             return True
         return False
