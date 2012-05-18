@@ -87,10 +87,10 @@ def _serialize(data):
     """
     #TODO(ewindisch): verify if we can eliminate this and ONLY use JSON
     try:
-        return json.dumps(data)
+        return str(json.dumps(data, ensure_ascii=True))
     except TypeError:
         LOG.warn(_("JSON serialization failed.\nFalling back to Pickle."))
-        return pickle.dumps(data, version=2)
+        return pickle.dumps(data, protocol=2)
 
 
 def _deserialize(data):
@@ -100,6 +100,7 @@ def _deserialize(data):
     If input is not JSON, fallback to Pickle.
     """
     #TODO(ewindisch): verify if we can eliminate this and ONLY use JSON
+    LOG.info("Deserializing: %s" % data)
     try:
         return json.loads(data)
     except ValueError:
@@ -123,6 +124,7 @@ class ZmqSocket(object):
         # Support failures on sending/receiving on wrong socket type.
         self.can_recv = zmq_type in (zmq.PULL, zmq.SUB)
         self.can_send = zmq_type in (zmq.PUSH, zmq.PUB)
+        self.can_sub = zmq_type in (zmq.SUB, )
 
         # Support list, str, & None for subscribe arg (cast to list)
         do_sub = {
@@ -150,6 +152,8 @@ class ZmqSocket(object):
         return dict(map(lambda t: (getattr(zmq, t), t), t_enum))[self.type]
 
     def subscribe(self, msg_filter):
+        """Subscribe"""
+        assert self.can_sub, "Cannot subscribe on this socket."
         LOG.info("Subscribing to %s" % msg_filter)
         #assert None, "subscribing msg_filter=%s" % msg_filter
         self.sock.setsockopt(zmq.SUBSCRIBE, msg_filter)
@@ -157,6 +161,7 @@ class ZmqSocket(object):
         #assert None, "subscribing msg_filter=%s" % msg_filter
 
     def unsubscribe(self, msg_filter):
+        """Unsubscribe"""
         if msg_filter not in self.subscriptions:
         	return None
         self.sock.setsockopt(zmq.UNSUBSCRIBE, msg_filter)
@@ -240,6 +245,7 @@ class InternalContext(object):
         """Process a curried message and cast the result to topic"""
         func = getattr(proxy, data['method'])
 
+        LOG.info("Running func with context: %s", ctx.to_dict())
         try:
             if 'args' in data:
                 result = func(ctx, **data['args'])
@@ -411,13 +417,18 @@ class ZmqProxy(ZmqBaseReactor):
     """
 
     def __init__(self, conf):
-        self.topic_proxy = {}
-
-        ipc_dir = conf.rpc_zmq_ipc_dir
-        self.topic_proxy['zmq_replies'] = \
-            ZmqSocket("ipc://%s/zmq_topic_zmq_replies" % (ipc_dir),
-                              zmq.PUB, bind=True)
         super(ZmqProxy, self).__init__(conf)
+
+        self.topic_proxy = {}
+        ipc_dir = conf.rpc_zmq_ipc_dir
+
+        #self.topic_proxy['zmq_replies'] = \
+        #    ZmqSocket("ipc://%s/zmq_topic_zmq_replies" % (ipc_dir),
+        #
+
+        self.topic_proxy['zmq_replies'] = \
+            ZmqSocket("tcp://*:9501/", zmq.PUB, bind=True)
+        self.sockets.append(self.topic_proxy['zmq_replies'])
 
     def consume(self, sock):
         ipc_dir = self.conf.rpc_zmq_ipc_dir
@@ -431,12 +442,13 @@ class ZmqProxy(ZmqBaseReactor):
                     ' '.join(map(pformat, data)))
 
         # Handle zmq_replies magic
-        if topic == 'zmq_replies':
+        if topic.startswith('zmq_replies'):
             sock_type = zmq.PUB
             inside = _deserialize(in_msg)
             msg_id = inside[-1]['args']['msg_id']
             response = inside[-1]['args']['response']
-            data = _serialize([ msg_id, response ])
+            LOG.info("->response->%s", response)
+            data = [ str(msg_id), _serialize(response) ]
         else:
         	sock_type = zmq.PUSH
 
@@ -586,7 +598,8 @@ def _call(addr, context, msg_id, topic, msg, timeout=None):
     # TODO(ewindisch): have reply consumer with dynamic subscription mgmt
     with \
         contextlib.closing(ZmqSocket(
-            "ipc://%s/zmq_topic_zmq_replies" % FLAGS.rpc_zmq_ipc_dir,
+            #"ipc://%s/zmq_topic_zmq_replies" % FLAGS.rpc_zmq_ipc_dir,
+            "tcp://localhost:9501",
             zmq.SUB, subscribe=msg_id, bind=False
         )) as msg_waiter, \
         Timeout(
@@ -598,7 +611,9 @@ def _call(addr, context, msg_id, topic, msg, timeout=None):
 
             LOG.info("Cast sent; Waiting reply")
             # Blocks until receives reply
-            responses = _deserialize(msg_waiter.recv()[-1])
+            recv = msg_waiter.recv()
+            LOG.info("Received message: %s" % recv)
+            responses = _deserialize(recv[-1])
 
     LOG.info("Unpacking response")
 
@@ -644,40 +659,40 @@ def _multi_send(method, context, topic, msg, timeout=None):
             eventlet.spawn_n(method, _addr, _context,
                              _topic, _topic, msg, timeout)
             return
-        method(_addr, _context, _topic, _topic, msg, timeout)
+        return method(_addr, _context, _topic, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
     return Connection(conf)
 
 
-def multicall(conf, *args):
+def multicall(conf, *args, **kwargs):
     """ Multiple calls """
     register_opts(conf)
-    style, target, data = _multi_send(_call, *args)
+    style, target, data = _multi_send(_call, *args, **kwargs)
     return data
 
 
-def call(conf, *args):
+def call(conf, *args, **kwargs):
     """ Send a message, expect a response """
     register_opts(conf)
-    style, target, data = _multi_send(_call, *args)
+    style, target, data = _multi_send(_call, *args, **kwargs)
     return data[-1]
 
 
-def cast(conf, *args):
+def cast(conf, *args, **kwargs):
     """ Send a message expecting no reply """
     register_opts(conf)
-    _multi_send(_cast, *args)
+    _multi_send(_cast, *args, **kwargs)
 
 
-def fanout_cast(conf, context, topic, msg):
+def fanout_cast(conf, context, topic, msg, **kwargs):
     """ Send a message to all listening and expect no reply """
     register_opts(conf)
-    _multi_send(_cast, context, 'fanout.'+str(topic), msg)
+    _multi_send(_cast, context, 'fanout.'+str(topic), msg, **kwargs)
 
 
-def notify(conf, context, topic, msg):
+def notify(conf, context, topic, msg, **kwargs):
     """
     Send notification event.
     Notifications are sent to topic-priority.
@@ -687,7 +702,7 @@ def notify(conf, context, topic, msg):
     # NOTE(ewindisch): dot-priority in rpc notifier does not
     # work with our assumptions.
     topic.replace('.', '-')
-    cast(conf, context, topic, msg)
+    cast(conf, context, topic, msg, **kwargs)
 
 
 def cleanup():
