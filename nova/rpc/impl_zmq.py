@@ -226,17 +226,17 @@ class InternalContext(object):
         self.proxy = proxy
         self.msg_waiter = None
 
-    def connect(self):
-        if not self.msg_waiter:
-            self.msg_waiter = ZmqClient('inproc://zmq_reply_queue')
+#    def connect(self):
+#        if not self.msg_waiter:
+#            self.msg_waiter = ZmqClient('inproc://zmq_reply_queue')
+#
+#    def process_reply(self, ctx, msg_id=None, response=None):
+#        """Process a reply"""
+#        print "Processing reply"
+#        self.connect()
+#        self.msg_waiter.cast(str(msg_id), str('zmq_replies'), response)
 
-    def process_reply(self, ctx, msg_id=None, response=None):
-        """Process a reply"""
-        print "Processing reply"
-        self.connect()
-        self.msg_waiter.cast(str(msg_id), str('zmq_replies'), response)
-
-    def get_response(self, ctx, proxy, topic, data):
+    def _get_response(self, ctx, proxy, topic, data):
         """Process a curried message and cast the result to topic"""
         func = getattr(proxy, data['method'])
 
@@ -260,13 +260,13 @@ class InternalContext(object):
 
         child_ctx = RpcContext.unmarshal(msg[0])
         response = ConsumerBase.normalize_reply(
-            self.get_response(child_ctx, proxy, topic, msg[1]),
+            self._get_response(child_ctx, proxy, topic, msg[1]),
             ctx.replies)
 
         LOG.info("Sending reply")
         #_multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
         #topic = 'fanout.' + topic.split('.')[0] + ".localhost"
-        topic = topic.split('.')[0] + ".localhost"
+        #topic = topic.split('.')[0] + ".localhost"
         #_multi_send('cast', ctx, topic, {
         cast(FLAGS, ctx, topic, {
             'method': '-process_reply',
