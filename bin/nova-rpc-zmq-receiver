@@ -18,6 +18,7 @@
 import eventlet
 eventlet.monkey_patch()
 
+import contextlib
 import gettext
 import os
 import string
@@ -42,6 +43,7 @@ POSSIBLE_TOPDIR = os.path.normpath(os.path.join(os.path.abspath(sys.argv[0]),
 if os.path.exists(os.path.join(POSSIBLE_TOPDIR, 'nova', '__init__.py')):
     sys.path.insert(0, POSSIBLE_TOPDIR)
 
+
 if __name__ == '__main__':
     utils.default_flagfile()
     flags.FLAGS(sys.argv)
@@ -59,35 +61,28 @@ if __name__ == '__main__':
                       ipc_dir, run_as_root=True)
         utils.execute('chmod', '750', ipc_dir, run_as_root=True)
 
-    reactor = impl_zmq.ZmqProxy(flags.FLAGS)
+    with contextlib.closing(impl_zmq.ZmqProxy(flags.FLAGS)) as reactor:
+        """
+        [client:PUSH]
+        -(tcp)-> [consume_in:PULL]
+        -(reactor)->  [consume_out:PUSH]
+        -(reactor)-> [replies_in:PULL]
+        -(inproc)-> [replies_out:PUB]
+        -(ipc)-> [consumer:SUB]
+        """
 
-    """
-    [client:PUSH]
-    -(tcp)-> [consume_in:PULL]
-    -(reactor)->  [consume_out:PUSH]
-    -(reactor)-> [replies_in:PULL]
-    -(inproc)-> [replies_out:PUB]
-    -(ipc)-> [consumer:SUB]
-    """
+        # Reply service
+        # Consumer service (feeds replies) - incoming path of inbound
+        # messages
+        consume_in = "tcp://%s:%s" % \
+            (FLAGS.rpc_zmq_bind_address,
+             FLAGS.rpc_zmq_port)
+        consume_out = 'inproc://zmq_reply_queue'
+        consumption_proxy = impl_zmq.InternalContext(None)
 
-    # Reply service
-    replies_in = 'inproc://zmq_reply_queue'
-    replies_out = "ipc://%s/zmq_reply_queue" % ipc_dir
-    reply_proxy = impl_zmq.InternalContext(None)
+        print "Registering consumption on %s" % FLAGS.rpc_zmq_port
+        reactor.register(consumption_proxy,
+                         consume_in, zmq.PULL, out_bind=True)
 
-    #reactor.register(reply_proxy, replies_in, zmq.PULL, replies_out, zmq.PUB)
-
-    # Consumer service (feeds replies) - incoming path of inbound
-    # messages
-    consume_in = "tcp://%s:%s" % \
-        (FLAGS.rpc_zmq_bind_address,
-         FLAGS.rpc_zmq_port)
-    consume_out = replies_in
-    consumption_proxy = reply_proxy
-
-    print "Registering consumption on %s" % FLAGS.rpc_zmq_port
-    reactor.register(consumption_proxy,
-                     consume_in, zmq.PULL, out_bind=True)
-
-    reactor.consume_in_thread()
-    reactor.wait()
+        reactor.consume_in_thread()
+        reactor.wait()
