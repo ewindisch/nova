@@ -412,6 +412,11 @@ class ZmqProxy(ZmqBaseReactor):
 
     def __init__(self, conf):
         self.topic_proxy = {}
+
+        ipc_dir = conf.rpc_zmq_ipc_dir
+        self.topic_proxy['zmq_replies'] = \
+            ZmqSocket("ipc://%s/zmq_topic_zmq_replies" % (ipc_dir),
+                              zmq.PUB, bind=True)
         super(ZmqProxy, self).__init__(conf)
 
     def consume(self, sock):
@@ -424,20 +429,20 @@ class ZmqProxy(ZmqBaseReactor):
 
         LOG.info(_("CONSUMER GOT %s") % \
                     ' '.join(map(pformat, data)))
-        if topic == 'zmq_replies':
-        	LOG.info("REPLY-PROCESSING")
-        	LOG.info("REPLY-PROCESSING")
-        	LOG.info("REPLY-PROCESSING")
-        	LOG.info("REPLY-PROCESSING")
 
-        ctx, request = _deserialize(in_msg)
-        ctx = RpcContext.unmarshal(ctx)
+        # Handle zmq_replies magic
+        if topic == 'zmq_replies':
+            sock_type = zmq.PUB
+            inside = _deserialize(in_msg)
+            msg_id = inside[-1]['args']['msg_id']
+            response = inside[-1]['args']['response']
+            data = _serialize([ msg_id, response ])
+        else:
+        	sock_type = zmq.PUSH
 
         if not topic in self.topic_proxy:
-            subscribe=(None, msg_id)[topic == 'zmq_replies']
-            sock_type=(zmq.PUSH, zmq.PUB)[bool(subscribe)]
             outq = ZmqSocket("ipc://%s/zmq_topic_%s" % (ipc_dir, topic),
-                               sock_type, subscribe=subscribe, bind=True)
+                               sock_type, bind=True)
             self.topic_proxy[topic] = outq
             self.sockets.append(outq)
             LOG.info(_("Created topic proxy: %s" % topic))
@@ -445,11 +450,6 @@ class ZmqProxy(ZmqBaseReactor):
         LOG.info(_("ROUTER RELAY-OUT START %(data)s") % { 'data': data})
         self.topic_proxy[topic].send(data)
         LOG.info(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % { 'data': data})
-
-        #TODO(ewindisch): do this better
-        if msg_id != topic:
-        	self.topic_proxy[topic].close()
-        	del self.topic_proxy[topic]
 
 
 class ZmqReactor(ZmqBaseReactor):
