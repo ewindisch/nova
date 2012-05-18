@@ -63,7 +63,7 @@ zmq_opts = [
     cfg.StrOpt('rpc_zmq_matchmaker', default='mod_matchmaker.MatchMakerRing',
         help='MatchMaker driver'),
 
-    cfg.IntOpt('rpc_zmq_start_port', default=9500,
+    cfg.IntOpt('rpc_zmq_port', default=9500,
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
 
     cfg.IntOpt('rpc_zmq_contexts', default=1,
@@ -88,8 +88,7 @@ def _serialize(data):
     try:
         return json.dumps(data)
     except TypeError:
-        LOG.warn(_("JSON serialization failed."
-                   "Falling back to Pickle."))
+        LOG.warn(_("JSON serialization failed.\nFalling back to Pickle."))
         return pickle.dumps(data, version=2)
 
 
@@ -282,8 +281,11 @@ class InternalContext(object):
             ctx.replies)
 
         LOG.info("Sending reply")
+        #_multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
+        #topic = 'fanout.' + topic.split('.')[0] + ".localhost"
         topic = topic.split('.')[0] + ".localhost"
-        _multi_send('cast', ctx, topic, {
+        #_multi_send('cast', ctx, topic, {
+        cast(FLAGS, ctx, topic, {
             'method': '-process_reply',
             'args': {
                 'msg_id': msg_id,
@@ -300,7 +302,7 @@ class ConsumerBase(object):
 
     @classmethod
     def normalize_reply(self, result, replies):
-        #NOTE(ewindisch): re-evaluate and document this method.
+        #TODO(ewindisch): re-evaluate and document this method.
         if isinstance(result, types.GeneratorType):
             return list(result)
         elif replies:
@@ -463,6 +465,7 @@ class ZmqProxy(ZmqBaseReactor):
 
         #TODO(ewindisch): do this better
         if msg_id != topic:
+        	self.topic_proxy[topic].close()
         	del self.topic_proxy[topic]
 
 
@@ -570,7 +573,7 @@ def _cast(addr, context, msg_id, topic, msg, timeout=None):
         conn.cast(msg_id, topic, payload)
 
 
-def _call(addr, style, context, topic, msg, timeout=None):
+def _call(addr, context, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or FLAGS.rpc_response_timeout
 
@@ -627,10 +630,10 @@ def _call(addr, style, context, topic, msg, timeout=None):
             raise rpc_common.deserialize_remote_exception(conf, resp['exc'])
         all_data.append(resp)
 
-    return style, topic, all_data[-1]
+    return "call", topic, all_data[-1]
 
 
-def _multi_send(style, context, topic, msg, timeout=None):
+def _multi_send(method, context, topic, msg, timeout=None):
     """
     Wraps the sending of messages,
     dispatches to the matchmaker and sends
@@ -653,13 +656,13 @@ def _multi_send(style, context, topic, msg, timeout=None):
     # This supports brokerless fanout (addresses > 1)
     for queue in queues:
         (_style, _context, _topic, ip_addr) = queue
-        _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_start_port)
+        _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_port)
 
-        if style.endswith("cast"):
-            eventlet.spawn_n(_cast, _addr, _style, _context,
-                             _topic, _topic, msg)
+        if method.__name__ == '_cast':
+            eventlet.spawn_n(method, _addr, _context,
+                             _topic, _topic, msg, timeout)
             return
-        return _call(_addr, _style, _context, _topic, msg, timeout)
+        method(_addr, _context, _topic, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
@@ -668,24 +671,28 @@ def create_connection(conf, new=True):
 
 def multicall(conf, *args):
     """ Multiple calls """
-    style, target, data = _multi_send("call", *args)
+    register_opts(conf)
+    style, target, data = _multi_send(_call, *args)
     return data
 
 
 def call(conf, *args):
     """ Send a message, expect a response """
-    style, target, data = _multi_send("call", *args)
+    register_opts(conf)
+    style, target, data = _multi_send(_call, *args)
     return data[-1]
 
 
 def cast(conf, *args):
     """ Send a message expecting no reply """
-    _multi_send("cast", *args)
+    register_opts(conf)
+    _multi_send(_cast, *args)
 
 
 def fanout_cast(conf, context, topic, msg):
     """ Send a message to all listening and expect no reply """
-    _multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
+    register_opts(conf)
+    _multi_send(_cast, context, 'fanout.'+str(topic), msg)
 
 
 def notify(conf, context, topic, msg):
@@ -694,10 +701,11 @@ def notify(conf, context, topic, msg):
     Notifications are sent to topic-priority.
     This differs from the AMQP drivers which send to topic.priority.
     """
+    register_opts(conf)
     # NOTE(ewindisch): dot-priority in rpc notifier does not
     # work with our assumptions.
     topic.replace('.', '-')
-    cast(context, topic, msg)
+    cast(conf, context, topic, msg)
 
 
 def cleanup():
@@ -720,9 +728,9 @@ def register_opts(conf):
     global matchmaker
     global FLAGS
 
-    conf.register_opts(zmq_opts)
-    FLAGS = conf
-
+    if not FLAGS:
+        conf.register_opts(zmq_opts)
+        FLAGS = conf
     # Don't re-set, if this method is called twice.
     if not ZMQ_CTX:
         ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
