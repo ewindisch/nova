@@ -20,6 +20,7 @@ import greenlet
 eventlet.monkey_patch()
 
 import collections
+import contextlib
 import cPickle as pickle
 import hashlib
 import itertools
@@ -182,15 +183,6 @@ class ZmqSocket(object):
         assert self.can_send, _("You cannot send on this socket.")
         self.sock.send_multipart(data)
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, value, traceback):
-        self.close()
-        #if exc_type is not None:
-        #	raise exc_type
-        #self.close()
-
 
 class ZmqClient(object):
     """Client for ZMQ sockets"""
@@ -204,15 +196,6 @@ class ZmqClient(object):
 
     def close(self):
         self.outq.close()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, type, value, traceback):
-        self.close()
-        #if exc_type is not None:
-        #	raise exc_type
-        #self.close()
 
 
 class RpcContext(context.RequestContext):
@@ -564,7 +547,7 @@ class Connection(nova.rpc.common.Connection):
 
 def _cast(addr, context, msg_id, topic, msg, timeout=None):
     timeout_cast = timeout or FLAGS.rpc_cast_timeout
-    with ZmqClient(addr) as conn, \
+    with contextlib.closing(ZmqClient(addr)) as conn, \
          Timeout(timeout_cast, exception=nova.rpc.common.Timeout) as t:
 
         payload = [RpcContext.marshal(context), msg]
@@ -573,7 +556,7 @@ def _cast(addr, context, msg_id, topic, msg, timeout=None):
         conn.cast(msg_id, topic, payload)
 
 
-def _call(addr, context, topic, msg, timeout=None):
+def _call(addr, context, msg_id, topic, msg, timeout=None):
     # timeout_response is how long we wait for a response
     timeout_response = timeout or FLAGS.rpc_response_timeout
 
@@ -602,10 +585,10 @@ def _call(addr, context, topic, msg, timeout=None):
     # Messages arriving async.
     # TODO(ewindisch): have reply consumer with dynamic subscription mgmt
     with \
-        ZmqSocket(
+        contextlib.closing(ZmqSocket(
             "ipc://%s/zmq_topic_zmq_replies" % FLAGS.rpc_zmq_ipc_dir,
             zmq.SUB, subscribe=msg_id, bind=False
-        ) as msg_waiter, \
+        )) as msg_waiter, \
         Timeout(
             timeout_response, exception=nova.rpc.common.Timeout
         ) as t_call:
@@ -640,10 +623,9 @@ def _multi_send(method, context, topic, msg, timeout=None):
     message to all relevant hosts.
     """
     conf = FLAGS
-    LOG.info(_("%(style)s %(msg)s") % {'style': style,
-        'msg': ' '.join(map(pformat, (topic, msg)))})
+    LOG.info(_("%(msg)s") % {'msg': ' '.join(map(pformat, (topic, msg)))})
 
-    queues = matchmaker.queues(style, context, topic)
+    queues = matchmaker.queues(context, topic)
     LOG.info(_("Sending message(s) to: %s") % queues)
 
     # Don't stack if we have no matchmaker results
@@ -655,7 +637,7 @@ def _multi_send(method, context, topic, msg, timeout=None):
 
     # This supports brokerless fanout (addresses > 1)
     for queue in queues:
-        (_style, _context, _topic, ip_addr) = queue
+        (_context, _topic, ip_addr) = queue
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_port)
 
         if method.__name__ == '_cast':
