@@ -282,6 +282,7 @@ class InternalContext(object):
             ctx.replies)
 
         LOG.info("Sending reply")
+        topic = topic.split('.')[0] + ".localhost"
         _multi_send('cast', ctx, topic, {
             'method': '-process_reply',
             'args': {
@@ -629,8 +630,7 @@ def _call(addr, style, context, topic, msg, timeout=None):
     return style, topic, all_data[-1]
 
 
-def _multi_send(style, context, topic, msg,
-     socket_type=None, timeout=None):
+def _multi_send(style, context, topic, msg, timeout=None):
     """
     Wraps the sending of messages,
     dispatches to the matchmaker and sends
@@ -666,23 +666,21 @@ def create_connection(conf, new=True):
     return Connection(conf)
 
 
-def multicall(context, topic, msg, timeout=None):
+def multicall(conf, *args):
     """ Multiple calls """
-    style, target, data = _multi_send("call", context, str(topic), msg,
-        timeout=timeout)
+    style, target, data = _multi_send("call", *args)
     return data
 
 
-def call(conf, context, topic, msg, timeout=None):
+def call(conf, *args):
     """ Send a message, expect a response """
-    style, target, data = _multi_send("call", context, str(topic), msg,
-        timeout=timeout)
+    style, target, data = _multi_send("call", *args)
     return data[-1]
 
 
-def cast(context, topic, msg):
+def cast(conf, *args):
     """ Send a message expecting no reply """
-    _multi_send("cast", context, str(topic), msg)
+    _multi_send("cast", *args)
 
 
 def fanout_cast(conf, context, topic, msg):
@@ -690,7 +688,7 @@ def fanout_cast(conf, context, topic, msg):
     _multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
 
 
-def notify(context, topic, msg):
+def notify(conf, context, topic, msg):
     """
     Send notification event.
     Notifications are sent to topic-priority.
