@@ -97,14 +97,14 @@ class MatchMakerBase(object):
     def add_negate_binding(self, binding, rule, last=False):
         self.bindings.append((binding, rule, True, last))
 
-    def queues(self, style, context, topic):
+    def queues(self, context, topic):
         workers = []
         for (binding, exchange, bit, last) in self.bindings:
             #x = binding.run(context, topic)
             #if (bit and not x) or x:
             #   workers.extend(exchange.run(style, context, topic))
             with binding:
-                workers.extend(exchange.run(style, context, topic))
+                workers.extend(exchange.run(context, topic))
 
             if len(workers) >= limit:
                 return workers[0:limit]
@@ -114,19 +114,19 @@ class MatchMakerBase(object):
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class PassExchange(Exchange):
-    def run(self, style, context, topic):
-        return (style, context, topic)
+    def run(self, context, topic):
+        return (context, topic)
 
 
 class DirectTopicBinding(Binding):
-    def __enter__(self, style, context, topic):
+    def __enter__(self, context, topic):
         if '.' in topic:
             return True
         return False
 
 
 class BareTopicBinding(Binding):
-    def __enter__(self, style, context, topic):
+    def __enter__(self, context, topic):
         if '.' not in topic:
             return True
         return False
@@ -135,7 +135,7 @@ class BareTopicBinding(Binding):
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class FanoutBinding(Binding):
-    def __enter__(self, style, context, topic):
+    def __enter__(self, context, topic):
         if topic.startswith('fanout.'):
             return True
         return False
@@ -235,10 +235,10 @@ class MatchMakerLocalhost(MatchMakerBase):
 #        print "Queues: %s" % x
 #        return x
 
-    def queues(self, style, context, topic):
+    def queues(self, context, topic):
         if '.' not in topic:
-            return [(style, context, topic + '.localhost', 'localhost')]
-        return [(style, context, topic, 'localhost'), ]
+            return [(context, topic + '.localhost', 'localhost')]
+        return [(context, topic, 'localhost'), ]
 
 
 class MatchMakerPassthrough(MatchMakerBase):
@@ -249,5 +249,5 @@ class MatchMakerPassthrough(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
 
-    def queues(self, style, context, topic):
-        return [(style, context, topic, topic), ]
+    def queues(self, context, topic):
+        return [(context, topic, topic), ]

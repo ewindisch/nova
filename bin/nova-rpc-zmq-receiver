@@ -81,11 +81,11 @@ if __name__ == '__main__':
     # messages
     consume_in = "tcp://%s:%s" % \
         (FLAGS.rpc_zmq_bind_address,
-         FLAGS.rpc_zmq_start_port)
+         FLAGS.rpc_zmq_port)
     consume_out = replies_in
     consumption_proxy = reply_proxy
 
-    print "Registering consumption on %s" % FLAGS.rpc_zmq_start_port
+    print "Registering consumption on %s" % FLAGS.rpc_zmq_port
     reactor.register(consumption_proxy,
                      consume_in, zmq.PULL, out_bind=True)
 
