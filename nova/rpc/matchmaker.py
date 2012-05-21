@@ -83,7 +83,7 @@ class Binding(object):
     def __init__(self):
         pass
 
-    def test(self, context, topic):
+    def test(self, topic):
         raise NotImplementedError()
 
 
@@ -91,23 +91,27 @@ class MatchMakerBase(object):
     """Match Maker Base Class"""
 
     def __init__(self):
-        # Array of tuples. Index [2] toggles negation
+        # Array of tuples. Index [2] toggles negation, [3] is last-if-true
         self.bindings = []
 
-    def add_binding(self, binding, rule, last=False):
+    def add_binding(self, binding, rule, last=True):
         self.bindings.append((binding, rule, False, last))
 
-    def add_negate_binding(self, binding, rule, last=False):
+    def add_negate_binding(self, binding, rule, last=True):
         self.bindings.append((binding, rule, True, last))
 
-    def queues(self, context, topic):
+    def queues(self, topic):
         workers = []
 
         # bit is for negate bindings - if we choose to implement it.
         # last stops processing rules if this matches.
         for (binding, exchange, bit, last) in self.bindings:
-        	if binding.test():
+            if binding.test(topic):
                 workers.extend(exchange.run(context, topic))
+
+                # Support last.
+                if last:
+                	return workers
 
             # Support a limit?
             #if len(workers) >= limit:
@@ -118,19 +122,19 @@ class MatchMakerBase(object):
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class PassExchange(Exchange):
-    def run(self, context, topic):
-        return (context, topic)
+    def run(self, topic):
+        return (topic)
 
 
 class DirectTopicBinding(Binding):
-    def test(self, context, topic):
+    def test(self, topic):
         if '.' in topic:
             return True
         return False
 
 
 class BareTopicBinding(Binding):
-    def test(self, context, topic):
+    def test(self, topic):
         if '.' not in topic:
             return True
         return False
@@ -139,7 +143,7 @@ class BareTopicBinding(Binding):
 # Get a host on bare topics.
 # Not needed for ROUTER_PUB which is always brokered.
 class FanoutBinding(Binding):
-    def test(self, context, topic):
+    def test(self, topic):
         if topic.startswith('fanout.'):
             return True
         return False
@@ -182,7 +186,7 @@ class RoundRobinRingExchange(RingExchange):
             )
             return []
         host = next(self)
-        return [topic + '.' + host]
+        return [(topic + '.' + host, host)]
 
 
 class FanoutRingExchange(RingExchange):
@@ -191,9 +195,9 @@ class FanoutRingExchange(RingExchange):
         super(FanoutRingExchange, self).__init__()
 
     def run(self, context, topic):
-        # Assume starts with "fanout."
+        # Assume starts with "fanout.", strip it.
         topic = topic.split('fanout.')[1:][0]
-        return map(lambda x: (topic + '.' + x), self.ring[topic])
+        return map(lambda x: (topic + '.' + x, x), self.ring[topic])
 
 
 class MatchMakerRing(MatchMakerBase):
@@ -203,14 +207,14 @@ class MatchMakerRing(MatchMakerBase):
     def __init__(self):
         super(MatchMakerRing, self).__init__()  # *args, **kwargs)
 
+        # fanout messaging
+        self.add_binding(FanoutBinding(), FanoutRingExchange())
+
         # Direct-to-host
         self.add_binding(DirectTopicBinding(), RoundRobinRingExchange())
 
         # Standard RR
-        self.add_binding(BareTopicBinding(), RoundrobinRingExchange())
-
-        # fanout messaging
-        self.add_binding(FanoutBinding(), FanoutRingExchange())
+        self.add_binding(BareTopicBinding(), RoundRobinRingExchange())
 
 
 class LocalhostExchange(Exchange):
@@ -219,7 +223,7 @@ class LocalhostExchange(Exchange):
         super(Exchange, self).__init__()
 
     def run(self, context, topic):
-        return [topic + '.' + 'locahost']
+        return [(topic + '.' + 'locahost', 'localhost')]
 
 
 class MatchMakerLocalhost(MatchMakerBase):
@@ -229,20 +233,9 @@ class MatchMakerLocalhost(MatchMakerBase):
     """
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
-        #self.add_binding(Binding(), RoundRobinRingExchange())
-        self.add_binding(BareTopicBinding(), RoundRobinRingExchange())
-        self.add_binding(BareTopicBinding(), FanoutRingExchange())
-        self.add_binding(FanoutBinding(), FanoutRingExchange())
-
-#    def queues(self, style, context, topic):
-#        x=super(MatchMakerLocalhost, self).queues(style, context, topic)
-#        print "Queues: %s" % x
-#        return x
-
-    def queues(self, context, topic):
-        if '.' not in topic:
-            return [(context, topic + '.localhost', 'localhost')]
-        return [(context, topic, 'localhost'), ]
+        self.add_binding(FanoutBinding(), LocalhostExchange())
+        self.add_binding(DirectTopicBinding(), LocalhostExchange())
+        self.add_binding(BareTopicBinding(), LocalhostExchange())
 
 
 class MatchMakerPassthrough(MatchMakerBase):
@@ -253,5 +246,5 @@ class MatchMakerPassthrough(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
 
-    def queues(self, context, topic):
-        return [(context, topic, topic), ]
+    def queues(self, topic):
+        return [(topic, topic), ]
