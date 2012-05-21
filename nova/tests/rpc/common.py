@@ -49,7 +49,8 @@ class BaseRpcTestCase(test.TestCase):
         if self.rpc:
             self.conn = self.rpc.create_connection(FLAGS, True)
             self.receiver = TestReceiver()
-            self.conn.create_consumer(self.topic, self.receiver, False)
+            self.dispatcher = rpc_dispatcher.RpcDispatcher([receiver])
+            self.conn.create_consumer(self.topic, self.dispatcher, False)
             self.conn.consume_in_thread()
 
     def tearDown(self):
@@ -152,11 +153,7 @@ class BaseRpcTestCase(test.TestCase):
         nested = Nested()
         dispatcher = rpc_dispatcher.RpcDispatcher([nested])
         conn = self.rpc.create_connection(FLAGS, True)
-<<<<<<< HEAD
-        conn.create_consumer('nested', dispatcher, False)
-=======
-        conn.create_consumer(self.topic_nested, nested, False)
->>>>>>> Add zeromq driver
+        conn.create_consumer(self.topic_nested, dispatcher, False)
         conn.consume_in_thread()
         value = 42
         result = self.rpc.call(FLAGS, self.context,
