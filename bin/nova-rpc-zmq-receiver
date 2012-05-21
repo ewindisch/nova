@@ -45,7 +45,7 @@ if os.path.exists(os.path.join(POSSIBLE_TOPDIR, 'nova', '__init__.py')):
 
 
 if __name__ == '__main__':
-    utils.default_flagfile()
+    #utils.default_flagfile()
     flags.FLAGS(sys.argv)
     FLAGS.register_opts(rpc.rpc_opts)
     impl_zmq.register_opts(flags.FLAGS)
