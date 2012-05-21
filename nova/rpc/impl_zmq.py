@@ -239,14 +239,15 @@ class InternalContext(object):
 
     def _get_response(self, ctx, proxy, topic, data):
         """Process a curried message and cast the result to topic"""
-        func = getattr(proxy, data['method'])
-
         LOG.debug("Running func with context: %s", ctx.to_dict())
+        data.setdefault('version', None)
+
         try:
             if 'args' in data:
-                result = func(ctx, **data['args'])
+                result = proxy.dispatch(
+                    ctx, data['version'], data['method'], **data['args'])
             else:
-                result = func(ctx)
+                result = proxy.dispatch(ctx, data['version'], data['method'])
             return ConsumerBase.normalize_reply(result, ctx.replies)
         except greenlet.GreenletExit:
             # ignore these since they are just from shutdowns
@@ -266,10 +267,6 @@ class InternalContext(object):
             ctx.replies)
 
         LOG.debug("Sending reply")
-        #_multi_send("fanout-cast", context, 'fanout.'+str(topic), msg)
-        #topic = 'fanout.' + topic.split('.')[0] + ".localhost"
-        #topic = topic.split('.')[0] + ".localhost"
-        #_multi_send('cast', ctx, topic, {
         cast(FLAGS, ctx, topic, {
             'method': '-process_reply',
             'args': {
@@ -306,22 +303,13 @@ class ConsumerBase(object):
         if data['method'][0] == '-':
             # For reply / process_reply
             method = method[1:]
-            iproxy = self.private_ctx  # self
+            iproxy = self.private_ctx
             if method == 'reply':
                 self.private_ctx.reply(ctx, proxy, **data['args'])
-                return None
-            elif method == 'process_reply':
-                return self.private_ctx.process_reply(ctx, **data['args'])
             return
-        else:
-            iproxy = proxy
 
-        try:
-            func = getattr(iproxy, data['method'])
-        except AttributeError:
-            return rpc_common.serialize_remote_exception(sys.exc_info())
-
-        func(ctx, **data['args'])
+        data.setdefault('version', None)
+        proxy.dispatch(ctx, data['version'], data['method'], **args)
 
 
 class ZmqBaseReactor(ConsumerBase):
@@ -598,7 +586,7 @@ def _call(addr, context, msg_id, topic, msg, timeout=None):
     all_data = []
     for resp in responses:
         if isinstance(resp, types.DictType) and 'exc' in resp:
-            raise rpc_common.deserialize_remote_exception(conf, resp['exc'])
+            raise rpc_common.deserialize_remote_exception(FLAGS, resp['exc'])
         all_data.append(resp)
 
     return "call", topic, all_data[-1]

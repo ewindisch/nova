@@ -48,7 +48,7 @@ class BaseRpcTestCase(test.TestCase):
         self.context = context.get_admin_context()
         if self.rpc:
             self.conn = self.rpc.create_connection(FLAGS, True)
-            self.receiver = TestReceiver()
+            receiver = TestReceiver()
             self.dispatcher = rpc_dispatcher.RpcDispatcher([receiver])
             self.conn.create_consumer(self.topic, self.dispatcher, False)
             self.conn.consume_in_thread()
