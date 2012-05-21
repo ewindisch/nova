@@ -119,13 +119,6 @@ class MatchMakerBase(object):
         return workers
 
 
-# Get a host on bare topics.
-# Not needed for ROUTER_PUB which is always brokered.
-class PassExchange(Exchange):
-    def run(self, topic):
-        return (topic)
-
-
 class DirectTopicBinding(Binding):
     def test(self, topic):
         if '.' in topic:
@@ -149,6 +142,13 @@ class FanoutBinding(Binding):
         return False
 
 
+# Get a host on bare topics.
+# Not needed for ROUTER_PUB which is always brokered.
+class StubExchange(Exchange):
+    def run(self, topic):
+        return [(topic, topic)]
+
+
 class RingExchange(Exchange):
     """
     Match Maker where hosts are loaded from a static file
@@ -162,12 +162,11 @@ class RingExchange(Exchange):
         for k in self.ring.keys():
             self.ring0[k] = itertools.cycle(self.ring[k])
         fh.close()
-        LOG.debug(_("RING:\n%s"), self.ring0)
 
     def next(self):
         return next(self.ring0[topic])
 
-    def _has(self, topic):
+    def _ring_has(self, topic):
         if topic in self.ring0:
         	return True
         return False
@@ -179,8 +178,8 @@ class RoundRobinRingExchange(RingExchange):
         super(RoundRobinRingExchange, self).__init__()
 
     def run(self, context, topic):
-        if not self._has(topic):
-            LOG.debug(
+        if not self._ring_has(topic):
+            LOG.warn(
                 _("No key defining hosts for topic '%(topic)', "
                   "see ringfile") % topic
             )
@@ -195,9 +194,24 @@ class FanoutRingExchange(RingExchange):
         super(FanoutRingExchange, self).__init__()
 
     def run(self, context, topic):
+        if not self._ring_has(topic):
+            LOG.warn(
+                _("No key defining hosts for topic '%(topic)', "
+                  "see ringfile") % topic
+            )
+            return []
         # Assume starts with "fanout.", strip it.
         topic = topic.split('fanout.')[1:][0]
         return map(lambda x: (topic + '.' + x, x), self.ring[topic])
+
+
+class LocalhostExchange(Exchange):
+    """Exchange where all direct topics are local"""
+    def __init__(self):
+        super(Exchange, self).__init__()
+
+    def run(self, context, topic):
+        return [(topic + '.' + 'locahost', 'localhost')]
 
 
 class MatchMakerRing(MatchMakerBase):
@@ -217,15 +231,6 @@ class MatchMakerRing(MatchMakerBase):
         self.add_binding(BareTopicBinding(), RoundRobinRingExchange())
 
 
-class LocalhostExchange(Exchange):
-    """Exchange where all direct topics are local"""
-    def __init__(self):
-        super(Exchange, self).__init__()
-
-    def run(self, context, topic):
-        return [(topic + '.' + 'locahost', 'localhost')]
-
-
 class MatchMakerLocalhost(MatchMakerBase):
     """
     Match Maker where all bare topics resolve to localhost.
@@ -238,7 +243,7 @@ class MatchMakerLocalhost(MatchMakerBase):
         self.add_binding(BareTopicBinding(), LocalhostExchange())
 
 
-class MatchMakerPassthrough(MatchMakerBase):
+class MatchMakerStub(MatchMakerBase):
     """
     Match Maker where topics are untouched.
     Useful for testing, or for AMQP/brokered queues.
@@ -246,5 +251,6 @@ class MatchMakerPassthrough(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
 
-    def queues(self, topic):
-        return [(topic, topic), ]
+        self.add_binding(FanoutBinding(), StubExchange())
+        self.add_binding(DirectTopicBinding(), StubExchange())
+        self.add_binding(BareTopicBinding(), StubExchange())
