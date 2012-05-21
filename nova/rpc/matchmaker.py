@@ -19,11 +19,10 @@ import itertools
 import json
 
 from nova import exception
-from nova.openstack.common import cfg
 from nova import flags
+from nova import log as logging
+from nova.openstack.common import cfg
 
-
-contextmanager = contextlib.contextmanager
 
 matchmaker_opts = [
     # Matchmaker ring file
@@ -34,6 +33,8 @@ matchmaker_opts = [
 
 FLAGS = flags.FLAGS
 FLAGS.register_opts(matchmaker_opts)
+LOG = logging.getLogger(__name__)
+contextmanager = contextlib.contextmanager
 
 
 """
@@ -166,8 +167,8 @@ class RoundRobinRingExchange(RingExchange):
     def run(self, key):
         if not self._ring_has(key):
             LOG.warn(
-                _("No key defining hosts for topic '%(key)', "
-                  "see ringfile") % key
+                _("No key defining hosts for topic '%s', "
+                  "see ringfile") % (key, )
             )
             return []
         host = next(self.ring0[key])

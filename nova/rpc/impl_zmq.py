@@ -25,11 +25,12 @@ import itertools
 import json
 import os
 import pprint
+import string
 import sys
 import types
 import uuid
 
-# These eventlets can be safely loaded later
+# These eventlet modules can be safely loaded here.
 from eventlet import greenpool
 from eventlet.green import zmq
 from eventlet import timeout as eventlet_timeout
@@ -38,8 +39,9 @@ import nova
 from nova import context
 from nova import flags
 from nova.openstack.common import cfg
+from nova.openstack.common import importutils
 from nova.rpc import common as rpc_common
-from nova.rpc import matchmaker as mod_matchmaker
+
 
 pformat = pprint.pformat
 Timeout = eventlet_timeout.Timeout
@@ -53,8 +55,9 @@ zmq_opts = [
     cfg.StrOpt('rpc_zmq_bind_address', default='*',
         help='ZeroMQ bind address'),
 
-    # The module to use for matchmaking.
-    cfg.StrOpt('rpc_zmq_matchmaker', default='mod_matchmaker.MatchMakerRing',
+    # The module.Class to use for matchmaking.
+    cfg.StrOpt('rpc_zmq_matchmaker',
+        default='nova.rpc.matchmaker.MatchMakerLocalhost',
         help='MatchMaker driver'),
 
     cfg.IntOpt('rpc_zmq_port', default=9500,
@@ -64,7 +67,10 @@ zmq_opts = [
         help='number of ZeroMQ contexts, defaults to 1'),
 
     cfg.StrOpt('rpc_zmq_ipc_dir', default='/var/run/nova',
-        help='directory for holding IPC sockets')
+        help='directory for holding IPC sockets'),
+
+    cfg.BoolOpt('rpc_zmq_fallback_pickle', default=False,
+        help='allow fallback to pickle, if JSON serialization fails.')
     ]
 
 
@@ -82,8 +88,12 @@ def _serialize(data):
     try:
         return str(json.dumps(data, ensure_ascii=True))
     except TypeError:
-        LOG.warn(_("JSON serialization failed.\nFalling back to Pickle."))
-        return pickle.dumps(data, protocol=2)
+        if conf.rpc_zmq_fallback_pickle:
+            LOG.warn(_("JSON serialization failed.\nFalling back to Pickle.\n"
+                       "Pickle fallback can be disabled"
+                       "per option rpc_zmq_fallback_pickle"))
+            return pickle.dumps(data, protocol=2)
+        raise
 
 
 def _deserialize(data):
@@ -97,7 +107,11 @@ def _deserialize(data):
     try:
         return json.loads(data)
     except ValueError:
-        return pickle.loads(data)
+        if conf.rpc_zmq_fallback_pickle:
+            LOG.warn(_("Failed JSON decoding. Attempting pickle per optional "
+                       "setting rpc_zmq_fallback_pickle."))
+            return pickle.loads(data)
+        raise
 
 
 class ZmqSocket(object):
@@ -726,7 +740,17 @@ def register_opts(conf):
     if not ZMQ_CTX:
         ZMQ_CTX = zmq.Context(conf.rpc_zmq_contexts)
     if not matchmaker:
-        module = globals()['mod_matchmaker']
-        # split(conf.rpc_zmq_matchmaker, '.')
-        constructor = getattr(module, 'MatchMakerLocalhost')
-        matchmaker = constructor()
+    	# rpc_zmq_matchmaker should be set to a 'module.Class'
+        mm_path = conf.rpc_zmq_matchmaker.split('.')
+        mm_module = '.'.join(mm_path[:-1])
+        mm_class = mm_path[-1]
+
+        # Only initialize a class.
+        if mm_path[-1][0] not in string.ascii_uppercase:
+            LOG.error("Matchmaker could not be loaded.\n"
+                      "rpc_zmq_matchmaker is not a class.")
+            raise
+
+        mm_impl = importutils.import_module(mm_module)
+        mm_constructor = getattr(mm_impl, mm_class)
+        matchmaker = mm_constructor()
