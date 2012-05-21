@@ -19,20 +19,14 @@ import eventlet
 import greenlet
 eventlet.monkey_patch()
 
-import collections
 import contextlib
 import cPickle as pickle
-import hashlib
 import itertools
 import json
-import logging
 import os
 import pprint
-import random
-import string
 import sys
 import types
-import traceback
 import uuid
 
 # These eventlets can be safely loaded later
@@ -43,7 +37,6 @@ from eventlet import timeout as eventlet_timeout
 import nova
 from nova import context
 from nova import flags
-from nova import utils
 from nova.openstack.common import cfg
 from nova.rpc import common as rpc_common
 from nova.rpc import matchmaker as mod_matchmaker
