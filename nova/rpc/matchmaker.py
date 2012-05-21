@@ -97,61 +97,68 @@ class MatchMakerBase(object):
     def add_binding(self, binding, rule, last=True):
         self.bindings.append((binding, rule, False, last))
 
-    def add_negate_binding(self, binding, rule, last=True):
-        self.bindings.append((binding, rule, True, last))
+    #def add_negate_binding(self, binding, rule, last=True):
+    #    self.bindings.append((binding, rule, True, last))
 
-    def queues(self, topic):
+    def queues(self, key):
         workers = []
 
         # bit is for negate bindings - if we choose to implement it.
         # last stops processing rules if this matches.
         for (binding, exchange, bit, last) in self.bindings:
-            if binding.test(topic):
-                workers.extend(exchange.run(context, topic))
+            if binding.test(key):
+                workers.extend(exchange.run(context, key))
 
                 # Support last.
                 if last:
                 	return workers
-
-            # Support a limit?
-            #if len(workers) >= limit:
-            #    return workers[0:limit]
         return workers
 
 
-class DirectTopicBinding(Binding):
-    def test(self, topic):
-        if '.' in topic:
+class DirectBinding(Binding):
+    """
+        Specifies a host in the key via a '.' character
+        Although dots are used in the key, the behavior here is
+        that it maps directly to a host, thus direct.
+    """
+    def test(self, key):
+        if '.' in key:
             return True
         return False
 
 
-class BareTopicBinding(Binding):
-    def test(self, topic):
-        if '.' not in topic:
+class TopicBinding(Binding):
+    """
+       Where a 'bare' key without dots.
+       AMQP generally considers topic exchanges to be those *with* dots,
+       but we deviate here in terminology as the behavior here matches
+       that of a topic exchange (whereas where there are dots, behavior
+       matches that of a direct exchange.
+    """
+    def test(self, key):
+        if '.' not in key:
             return True
         return False
 
 
-# Get a host on bare topics.
-# Not needed for ROUTER_PUB which is always brokered.
 class FanoutBinding(Binding):
+    """Match on fanout keys, where key starts with 'fanout.' string."""
     def test(self, topic):
         if topic.startswith('fanout.'):
             return True
         return False
 
 
-# Get a host on bare topics.
-# Not needed for ROUTER_PUB which is always brokered.
 class StubExchange(Exchange):
+    """Exchange that does nothing"""
     def run(self, topic):
-        return [(topic, topic)]
+        return [(topic, None)]
 
 
 class RingExchange(Exchange):
     """
-    Match Maker where hosts are loaded from a static file
+    Match Maker where hosts are loaded from a static file containing
+    a hashmap (JSON formatted)
     """
     def __init__(self):
         super(RingExchange, self).__init__()
@@ -173,7 +180,7 @@ class RingExchange(Exchange):
 
 
 class RoundRobinRingExchange(RingExchange):
-    """A Topic Exchange"""
+    """A Topic Exchange based on a hashmap"""
     def __init__(self):
         super(RoundRobinRingExchange, self).__init__()
 
@@ -189,7 +196,7 @@ class RoundRobinRingExchange(RingExchange):
 
 
 class FanoutRingExchange(RingExchange):
-    """Fanout Exchange"""
+    """Fanout Exchange based on a hashmap"""
     def __init__(self):
         super(FanoutRingExchange, self).__init__()
 
@@ -216,7 +223,7 @@ class LocalhostExchange(Exchange):
 
 class MatchMakerRing(MatchMakerBase):
     """
-    Match Maker where hosts are loaded from a static file
+    Match Maker where hosts are loaded from a static hashmap.
     """
     def __init__(self):
         super(MatchMakerRing, self).__init__()  # *args, **kwargs)
@@ -225,10 +232,10 @@ class MatchMakerRing(MatchMakerBase):
         self.add_binding(FanoutBinding(), FanoutRingExchange())
 
         # Direct-to-host
-        self.add_binding(DirectTopicBinding(), RoundRobinRingExchange())
+        self.add_binding(DirectBinding(), RoundRobinRingExchange())
 
         # Standard RR
-        self.add_binding(BareTopicBinding(), RoundRobinRingExchange())
+        self.add_binding(TopicBinding(), RoundRobinRingExchange())
 
 
 class MatchMakerLocalhost(MatchMakerBase):
@@ -239,8 +246,8 @@ class MatchMakerLocalhost(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
         self.add_binding(FanoutBinding(), LocalhostExchange())
-        self.add_binding(DirectTopicBinding(), LocalhostExchange())
-        self.add_binding(BareTopicBinding(), LocalhostExchange())
+        self.add_binding(DirectBinding(), LocalhostExchange())
+        self.add_binding(TopicBinding(), LocalhostExchange())
 
 
 class MatchMakerStub(MatchMakerBase):
@@ -252,5 +259,5 @@ class MatchMakerStub(MatchMakerBase):
         super(MatchMakerLocalhost, self).__init__()
 
         self.add_binding(FanoutBinding(), StubExchange())
-        self.add_binding(DirectTopicBinding(), StubExchange())
-        self.add_binding(BareTopicBinding(), StubExchange())
+        self.add_binding(DirectBinding(), StubExchange())
+        self.add_binding(TopicBinding(), StubExchange())
