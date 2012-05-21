@@ -440,7 +440,7 @@ class ZmqProxy(ZmqBaseReactor):
             inside = _deserialize(in_msg)
             msg_id = inside[-1]['args']['msg_id']
             response = inside[-1]['args']['response']
-            LOG.info("->response->%s", response)
+            LOG.debug("->response->%s", response)
             data = [ str(msg_id), _serialize(response) ]
         else:
         	sock_type = zmq.PUSH
@@ -452,9 +452,9 @@ class ZmqProxy(ZmqBaseReactor):
             self.sockets.append(outq)
             LOG.info(_("Created topic proxy: %s" % topic))
 
-        LOG.info(_("ROUTER RELAY-OUT START %(data)s") % { 'data': data})
+        LOG.debug(_("ROUTER RELAY-OUT START %(data)s") % { 'data': data})
         self.topic_proxy[topic].send(data)
-        LOG.info(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % { 'data': data})
+        LOG.debug(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % { 'data': data})
 
 
 class ZmqReactor(ZmqBaseReactor):
