@@ -198,7 +198,20 @@ class LocalhostExchange(Exchange):
         super(Exchange, self).__init__()
 
     def run(self, key):
-        return [(key + '.' + 'locahost', 'localhost')]
+        return [(key.split('.')[0]+'.localhost', 'localhost')]
+
+
+class DirectExchange(Exchange):
+    """
+    Exchange where all topic keys are split, sending to second half.
+    i.e. "compute.host" sends a message to "compute" running on "host"
+    """
+    def __init__(self):
+        super(Exchange, self).__init__()
+
+    def run(self, key):
+        b,e = key.split('.', 1)
+        return [(b, e)]
 
 
 class MatchMakerRing(MatchMakerBase):
@@ -207,14 +220,8 @@ class MatchMakerRing(MatchMakerBase):
     """
     def __init__(self):
         super(MatchMakerRing, self).__init__()
-
-        # fanout messaging
         self.add_binding(FanoutBinding(), FanoutRingExchange())
-
-        # Direct-to-host
         self.add_binding(DirectBinding(), RoundRobinRingExchange())
-
-        # Standard RR
         self.add_binding(TopicBinding(), RoundRobinRingExchange())
 
 
@@ -226,7 +233,7 @@ class MatchMakerLocalhost(MatchMakerBase):
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
         self.add_binding(FanoutBinding(), LocalhostExchange())
-        self.add_binding(DirectBinding(), LocalhostExchange())
+        self.add_binding(DirectBinding(), DirectExchange())
         self.add_binding(TopicBinding(), LocalhostExchange())
 
 
