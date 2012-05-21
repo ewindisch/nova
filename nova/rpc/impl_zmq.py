@@ -640,7 +640,8 @@ def _multi_send(method, context, topic, msg, timeout=None):
     conf = FLAGS
     LOG.info(_("%(msg)s") % {'msg': ' '.join(map(pformat, (topic, msg)))})
 
-    queues = matchmaker.queues(context, topic)
+    #queues = matchmaker.queues(context, topic)
+    queues = matchmaker.queues(topic)
     LOG.info(_("Sending message(s) to: %s") % queues)
 
     # Don't stack if we have no matchmaker results
@@ -652,14 +653,14 @@ def _multi_send(method, context, topic, msg, timeout=None):
 
     # This supports brokerless fanout (addresses > 1)
     for queue in queues:
-        (_context, _topic, ip_addr) = queue
+        (_topic, ip_addr) = queue
         _addr = "tcp://%s:%s" % (ip_addr, conf.rpc_zmq_port)
 
         if method.__name__ == '_cast':
-            eventlet.spawn_n(method, _addr, _context,
+            eventlet.spawn_n(method, _addr, context,
                              _topic, _topic, msg, timeout)
             return
-        return method(_addr, _context, _topic, _topic, msg, timeout)
+        return method(_addr, context, _topic, _topic, msg, timeout)
 
 
 def create_connection(conf, new=True):
