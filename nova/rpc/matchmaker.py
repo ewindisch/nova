@@ -221,7 +221,7 @@ class MatchMakerRing(MatchMakerBase):
     def __init__(self):
         super(MatchMakerRing, self).__init__()
         self.add_binding(FanoutBinding(), FanoutRingExchange())
-        self.add_binding(DirectBinding(), RoundRobinRingExchange())
+        self.add_binding(DirectBinding(), DirectExchange())
         self.add_binding(TopicBinding(), RoundRobinRingExchange())
 
 
@@ -241,6 +241,7 @@ class MatchMakerStub(MatchMakerBase):
     """
     Match Maker where topics are untouched.
     Useful for testing, or for AMQP/brokered queues.
+    Will not work where knowledge of hosts is known (i.e. zeromq)
     """
     def __init__(self):
         super(MatchMakerLocalhost, self).__init__()
