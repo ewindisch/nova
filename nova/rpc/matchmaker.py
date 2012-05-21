@@ -14,31 +14,13 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import eventlet
-from greenlet import GreenletExit
-eventlet.monkey_patch()
-
-import collections
 import contextlib
-import hashlib
 import itertools
 import json
-import os
-from pprint import pformat
-import random
-import socket
-import string
-import sys
-import types
-import traceback
-import uuid
 
-from nova import context
 from nova import exception
 from nova.openstack.common import cfg
-from nova.rpc.common import RemoteError, LOG
 from nova import flags
-from nova import utils
 
 
 contextmanager = contextlib.contextmanager
@@ -72,7 +54,7 @@ class Exchange(object):
     def __init__(self):
         pass
 
-    def run(self, context, topic):
+    def run(self, key):
         raise NotImplementedError()
 
 
@@ -83,7 +65,7 @@ class Binding(object):
     def __init__(self):
         pass
 
-    def test(self, topic):
+    def test(self, key):
         raise NotImplementedError()
 
 
@@ -107,7 +89,7 @@ class MatchMakerBase(object):
         # last stops processing rules if this matches.
         for (binding, exchange, bit, last) in self.bindings:
             if binding.test(key):
-                workers.extend(exchange.run(context, key))
+                workers.extend(exchange.run(key))
 
                 # Support last.
                 if last:
@@ -143,16 +125,16 @@ class TopicBinding(Binding):
 
 class FanoutBinding(Binding):
     """Match on fanout keys, where key starts with 'fanout.' string."""
-    def test(self, topic):
-        if topic.startswith('fanout.'):
+    def test(self, key):
+        if key.startswith('fanout.'):
             return True
         return False
 
 
 class StubExchange(Exchange):
     """Exchange that does nothing"""
-    def run(self, topic):
-        return [(topic, None)]
+    def run(self, key):
+        return [(key, None)]
 
 
 class RingExchange(Exchange):
@@ -170,11 +152,8 @@ class RingExchange(Exchange):
             self.ring0[k] = itertools.cycle(self.ring[k])
         fh.close()
 
-    def next(self):
-        return next(self.ring0[topic])
-
-    def _ring_has(self, topic):
-        if topic in self.ring0:
+    def _ring_has(self, key):
+        if key in self.ring0:
         	return True
         return False
 
@@ -184,15 +163,15 @@ class RoundRobinRingExchange(RingExchange):
     def __init__(self):
         super(RoundRobinRingExchange, self).__init__()
 
-    def run(self, context, topic):
-        if not self._ring_has(topic):
+    def run(self, key):
+        if not self._ring_has(key):
             LOG.warn(
-                _("No key defining hosts for topic '%(topic)', "
-                  "see ringfile") % topic
+                _("No key defining hosts for topic '%(key)', "
+                  "see ringfile") % key
             )
             return []
-        host = next(self)
-        return [(topic + '.' + host, host)]
+        host = next(self.ring0[key])
+        return [(key + '.' + host, host)]
 
 
 class FanoutRingExchange(RingExchange):
@@ -200,16 +179,16 @@ class FanoutRingExchange(RingExchange):
     def __init__(self):
         super(FanoutRingExchange, self).__init__()
 
-    def run(self, context, topic):
-        if not self._ring_has(topic):
+    def run(self, key):
+        if not self._ring_has(key):
             LOG.warn(
-                _("No key defining hosts for topic '%(topic)', "
-                  "see ringfile") % topic
+                _("No key defining hosts for topic '%(key)', "
+                  "see ringfile") % key
             )
             return []
         # Assume starts with "fanout.", strip it.
-        topic = topic.split('fanout.')[1:][0]
-        return map(lambda x: (topic + '.' + x, x), self.ring[topic])
+        nkey = key.split('fanout.')[1:][0]
+        return map(lambda x: (nkey + '.' + x, x), self.ring[nkey])
 
 
 class LocalhostExchange(Exchange):
@@ -217,8 +196,8 @@ class LocalhostExchange(Exchange):
     def __init__(self):
         super(Exchange, self).__init__()
 
-    def run(self, context, topic):
-        return [(topic + '.' + 'locahost', 'localhost')]
+    def run(self, key):
+        return [(key + '.' + 'locahost', 'localhost')]
 
 
 class MatchMakerRing(MatchMakerBase):
@@ -226,7 +205,7 @@ class MatchMakerRing(MatchMakerBase):
     Match Maker where hosts are loaded from a static hashmap.
     """
     def __init__(self):
-        super(MatchMakerRing, self).__init__()  # *args, **kwargs)
+        super(MatchMakerRing, self).__init__()
 
         # fanout messaging
         self.add_binding(FanoutBinding(), FanoutRingExchange())
