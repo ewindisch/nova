@@ -75,6 +75,10 @@ ZMQ_CTX = zmq.Context(1)
 matchmaker = None
 
 
+class CastTimeout(nova.rpc.common.Timeout):
+    pass
+
+
 class TopicManager(object):
     """ TopicManager helps us manage our topics """
     ROUTER_PUSH = 0  # Input for central broker RR queue  (send to this)
@@ -645,12 +649,10 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
     if style == 'cast':
         try:
             # Casts should be quick, don't use standard time-out.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t:
+            with Timeout(14, exception=CastTimeout) as t:
                 payload = [RpcContext.marshal(context), msg]
                 # assumes cast can't return an exception
                 return conn.cast(topic, topic, payload)
-        except Timeout:  # Ignore the timeouts
-            pass
         finally:
             conn.close()
             return
@@ -686,15 +688,17 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
         zmq.SUB, subscribe=msg_id, bind=False)
 
     try:
-        with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
-            # We timeout no more than 30 seconds for the cast itself.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t1:
-                conn.cast(msg_id, topic, payload)
+        # We timeout no more than 14 seconds for the cast itself.
+        with Timeout(14, exception=CastTimeout) as t1:
+            conn.cast(msg_id, topic, payload)
+    finally:
+        conn.close()
 
+    try:
+        with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
             # Blocks until receives reply
             responses = pickle.loads(msg_waiter.recv()[-1])
     finally:
-        conn.close()
         msg_waiter.close()
         del msg_waiter
 
@@ -737,12 +741,17 @@ def _multi_send(style, context, topic, msg, socket_type=None, timeout=None):
 
     # This supports brokerless fanout (addresses > 1)
     for addr in addresses:
-        if style == "cast":
-            eventlet.spawn_n(_send, addr, style, context, topic, msg,
-                             socket_type, timeout)
-        else:
-            return _send(addr, style, context, topic,
-                         msg, socket_type, timeout)
+        try:
+            return _send(addr, style, context, topic, msg,
+                         socket_type, timeout)
+        except CastTimeout:
+            # Don't worry about lost messages on a fanout, only retry if
+            # sending to one destination address.
+            if len(addresses) == 1:
+                # Recurse to get another matchmaker result and retry.
+                with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
+                    return _multi_send(style, context,
+                                topic, msg, socket_type, timeout)
 
 
 def create_connection(new=True):
