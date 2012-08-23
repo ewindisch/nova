@@ -66,6 +66,9 @@ zmq_opts = [
     cfg.IntOpt('rpc_zmq_start_port', default=9500,
         help='zmq first port (will consume subsequent ~50-75 TCP ports)'),
 
+    cfg.IntOpt('rpc_zmq_cast_timeout', default=30,
+        help='seconds to wait for a cast to complete.'),
+
     ]
 
 FLAGS = flags.FLAGS
@@ -645,7 +648,8 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
     if style == 'cast':
         try:
             # Casts should be quick, don't use standard time-out.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t:
+            with Timeout(FLAGS.rpc_zmq_cast_timeout,
+                    exception=nova.rpc.common.Timeout) as t:
                 payload = [RpcContext.marshal(context), msg]
                 # assumes cast can't return an exception
                 return conn.cast(topic, topic, payload)
@@ -688,7 +692,8 @@ def _send(addr, style, context, topic, msg, socket_type=None, timeout=None):
     try:
         with Timeout(timeout, exception=nova.rpc.common.Timeout) as t:
             # We timeout no more than 30 seconds for the cast itself.
-            with Timeout(30, exception=nova.rpc.common.Timeout) as t1:
+            with Timeout(FLAGS.rpc_zmq_cast_timeout,
+                    exception=nova.rpc.common.Timeout) as t1:
                 conn.cast(msg_id, topic, payload)
 
             # Blocks until receives reply
