@@ -30,6 +30,7 @@ from nova.openstack.common.gettextutils import _
 from nova.openstack.common import importutils
 from nova.openstack.common import jsonutils
 from nova.openstack.common.rpc import common as rpc_common
+from nova.openstack.common.rpc import dispatcher
 
 
 # for convenience, are not modified.
@@ -57,6 +58,9 @@ zmq_opts = [
     # The following port is unassigned by IANA as of 2012-05-21
     cfg.IntOpt('rpc_zmq_port', default=9501,
                help='ZeroMQ receiver listening port'),
+
+    cfg.IntOpt('rpc_zmq_port_pub', default=9502,
+               help='ZeroMQ fanout publisher port'),
 
     cfg.IntOpt('rpc_zmq_contexts', default=1,
                help='Number of ZeroMQ contexts, defaults to 1'),
@@ -299,6 +303,9 @@ class ConsumerBase(object):
         else:
             return [result]
 
+    def consume(self, sock):
+        raise NotImplementedError()
+
     def process(self, style, target, proxy, ctx, data):
         # Method starting with - are
         # processed internally. (non-valid method name)
@@ -456,6 +463,20 @@ class ZmqProxy(ZmqBaseReactor):
         LOG.debug(_("ROUTER RELAY-OUT SUCCEEDED %(data)s") % {'data': data})
 
 
+class CallbackReactor(ZmqBaseReactor):
+    """
+    A consumer class passing messages to a callback
+    """
+
+    def __init__(self, conf, callback):
+        self._cb = callback
+        super(CallbackReactor, self).__init__(conf)
+
+    def consume(self, sock):
+        data = sock.recv()
+        self._cb(data)
+
+
 class ZmqReactor(ZmqBaseReactor):
     """
     A consumer class implementing a
@@ -493,6 +514,18 @@ class Connection(rpc_common.Connection):
     def __init__(self, conf):
         self.reactor = ZmqReactor(conf)
 
+    def declare_topic_consumer(self, topic, callback=None,
+            queue_name=None):
+        """declare_topic_consumer is a private method, but
+           it is being used by Quantum (Folsom).
+           This has been added compatibility.
+        """
+        if CONF.rpc_zmq_host in matchmaker.queues("fanout~%s" % (topic, )):
+            return
+
+        reactor = CallbackReactor(callback)
+        self._consume_fanout(reactor, "publisher#%s" % (topic, ), None)
+
     def create_consumer(self, topic, proxy, fanout=False):
         # Only consume on the base topic name.
         topic = topic.split('.', 1)[0]
@@ -500,8 +533,18 @@ class Connection(rpc_common.Connection):
         LOG.info(_("Create Consumer for topic (%(topic)s)") %
                  {'topic': topic})
 
-        # Subscription scenarios
+        # Consume direct-push fanout messages (relay to local consumers)
         if fanout:
+            # If we're not in here, we can't receive direct fanout messages
+            if CONF.rpc_zmq_host in matchmaker.queues(topic):
+                # Consume from all remote publishers.
+                self._consume_fanout(self.reactor, topic, proxy)
+            else:
+                LOG.warn("This service cannot receive direct PUSH fanout "
+                         "messages without being known by the matchmaker.")
+                return
+
+            # Configure consumer for direct pushes.
             subscribe = (topic, fanout)[type(fanout) == str]
             sock_type = zmq.SUB
             topic = 'fanout~' + topic
@@ -518,8 +561,14 @@ class Connection(rpc_common.Connection):
         LOG.debug(_("Consumer is a zmq.%s"),
                   ['PULL', 'SUB'][sock_type == zmq.SUB])
 
+        # Consume messages from local rpc-zmq-receiver daemon.
         self.reactor.register(proxy, inaddr, sock_type,
                               subscribe=subscribe, in_bind=False)
+
+    def _consume_fanout(self, reactor, topic, proxy):
+        for host in matchmaker.queues("publisher#%s" % (topic, )):
+            inaddr = "tcp://%s:%s" % (host, CONF.rpc_zmq_port)
+            reactor.register(proxy, inaddr, zmq.SUB, in_bind=False)
 
     def close(self):
         self.reactor.close()
