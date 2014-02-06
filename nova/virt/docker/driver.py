@@ -22,6 +22,7 @@ import random
 import socket
 import time
 
+import docker
 from oslo.config import cfg
 
 from nova.compute import flavors
@@ -66,7 +67,9 @@ class DockerDriver(driver.ComputeDriver):
     @property
     def docker(self):
         if self._docker is None:
-            self._docker = nova.virt.docker.client.DockerHTTPClient()
+            self._docker = docker.Client(base_url='unix://var/run/docker.sock',
+                                         version='1.7',
+                                         timeout=10)
         return self._docker
 
     def init_host(self, host):
@@ -82,7 +85,7 @@ class DockerDriver(driver.ComputeDriver):
 
     def is_daemon_running(self):
         try:
-            self.docker.list_containers()
+            self.docker.containers()
             return True
         except socket.error:
             # NOTE(samalba): If the daemon is not running, we'll get a socket
@@ -93,7 +96,7 @@ class DockerDriver(driver.ComputeDriver):
 
     def list_instances(self, inspect=False):
         res = []
-        for container in self.docker.list_containers():
+        for container in self.docker.containers():
             info = self.docker.inspect_container(container['id'])
             if inspect:
                 res.append(info)
@@ -278,29 +281,28 @@ class DockerDriver(driver.ComputeDriver):
               admin_password, network_info=None, block_device_info=None):
         image_name = self._get_image_name(context, instance, image_meta)
         args = {
-            'Hostname': instance['name'],
-            'Image': image_name,
-            'Memory': self._get_memory_limit_bytes(instance),
-            'CpuShares': self._get_cpu_shares(instance)
+            'hostname': instance['name'],
+            'mem_limit': self._get_memory_limit_bytes(instance),
+            'cpu_shares': self._get_cpu_shares(instance)
         }
         default_cmd = self._get_default_cmd(image_name)
         if default_cmd:
             args['Cmd'] = default_cmd
-        container_id = self._create_container(instance, args)
+        container_id = self._create_container(instance, image_name, args)
         if not container_id:
             msg = _('Image name "{0}" does not exist, fetching it...')
             LOG.info(msg.format(image_name))
-            res = self.docker.pull_repository(image_name)
+            res = self.docker.pull(image_name)
             if res is False:
                 raise exception.InstanceDeployFailure(
                     _('Cannot pull missing image'),
                     instance_id=instance['name'])
-            container_id = self._create_container(instance, args)
+            container_id = self._create_container(instance, image_name, args)
             if not container_id:
                 raise exception.InstanceDeployFailure(
                     _('Cannot create container'),
                     instance_id=instance['name'])
-        self.docker.start_container(container_id)
+        self.docker.start(container_id)
         try:
             self._setup_network(instance, network_info)
         except Exception as e:
@@ -315,8 +317,8 @@ class DockerDriver(driver.ComputeDriver):
         container_id = self.find_container_by_name(instance['name']).get('id')
         if not container_id:
             return
-        self.docker.stop_container(container_id)
-        self.docker.destroy_container(container_id)
+        self.docker.stop(container_id)
+        self.docker.remove_container(container_id)
         network.teardown_network(container_id)
 
     def cleanup(self, context, instance, network_info, block_device_info=None,
@@ -329,10 +331,10 @@ class DockerDriver(driver.ComputeDriver):
         container_id = self.find_container_by_name(instance['name']).get('id')
         if not container_id:
             return
-        if not self.docker.stop_container(container_id):
+        if not self.docker.stop(container_id):
             LOG.warning(_('Cannot stop the container, '
                           'please check docker logs'))
-        if not self.docker.start_container(container_id):
+        if not self.docker.start(container_id):
             LOG.warning(_('Cannot restart the container, '
                           'please check docker logs'))
 
@@ -340,7 +342,7 @@ class DockerDriver(driver.ComputeDriver):
         container_id = self.find_container_by_name(instance['name']).get('id')
         if not container_id:
             return
-        self.docker.start_container(container_id)
+        self.docker.start(container_id)
 
     def power_off(self, instance):
         container_id = self.find_container_by_name(instance['name']).get('id')
@@ -352,12 +354,12 @@ class DockerDriver(driver.ComputeDriver):
         container_id = self.find_container_by_name(instance.name).get('id')
         if not container_id:
             return
-        return self.docker.get_container_logs(container_id)
+        return self.docker.logs(container_id)
 
     def _get_registry_port(self):
         default_port = CONF.docker.registry_default_port
         registry = None
-        for container in self.docker.list_containers(_all=False):
+        for container in self.docker.containers(_all=False):
             container = self.docker.inspect_container(container['id'])
             if 'docker-registry' in container['Path']:
                 registry = container
@@ -388,11 +390,11 @@ class DockerDriver(driver.ComputeDriver):
                                     registry_port,
                                     name)
         commit_name = name if not default_tag else name + ':latest'
-        self.docker.commit_container(container_id, commit_name)
+        self.docker.commit(container_id, repository=commit_name)
         update_task_state(task_state=task_states.IMAGE_UPLOADING,
                           expected_state=task_states.IMAGE_PENDING_UPLOAD)
         headers = {'X-Meta-Glance-Image-Id': image_href}
-        self.docker.push_repository(name, headers=headers)
+        self.docker.push(name)
 
     def _get_cpu_shares(self, instance):
         """Get allocated CPUs from configured flavor.
@@ -412,6 +414,7 @@ class DockerDriver(driver.ComputeDriver):
         flavor = flavors.extract_flavor(instance)
         return int(flavor['vcpus']) * 1024
 
-    def _create_container(self, instance, args):
+    def _create_container(self, instance, image_name, args):
         name = "nova-" + instance['uuid']
-        return self.docker.create_container(args, name)
+        args.update(name)
+        return self.docker.create_container(image_name, args)
