@@ -38,6 +38,7 @@ import nova.virt.docker.client
 from nova.virt.docker import hostinfo
 from nova.virt.docker import network
 from nova.virt import driver
+from nova.virt import hostutils
 
 
 docker_opts = [
@@ -415,3 +416,6 @@ class DockerDriver(driver.ComputeDriver):
     def _create_container(self, instance, args):
         name = "nova-" + instance['uuid']
         return self.docker.create_container(args, name)
+
+    def get_host_uptime(self, host):
+        return hostutils.get_host_uptime()

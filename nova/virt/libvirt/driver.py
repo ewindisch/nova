@@ -95,6 +95,7 @@ from nova.virt.disk import api as disk
 from nova.virt import driver
 from nova.virt import event as virtevent
 from nova.virt import firewall
+from nova.virt import hostutils
 from nova.virt.libvirt import blockinfo
 from nova.virt.libvirt import config as vconfig
 from nova.virt.libvirt import firewall as libvirt_firewall
@@ -4675,11 +4676,7 @@ class LibvirtDriver(driver.ComputeDriver):
         return stats
 
     def get_host_uptime(self, host):
-        """Returns the result of calling "uptime"."""
-        #NOTE(dprince): host seems to be ignored for this call and in
-        # other compute drivers as well. Perhaps we should remove it?
-        out, err = utils.execute('env', 'LANG=C', 'uptime')
-        return out
+        return hostutils.get_host_uptime()
 
     def manage_image_cache(self, context, all_instances):
         """Manage the local cache of images."""
