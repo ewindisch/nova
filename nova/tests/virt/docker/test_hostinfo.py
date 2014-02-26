@@ -18,6 +18,7 @@ import posix
 import mock
 
 from nova import test
+from nova.tests.virt.docker import stubs
 from nova.virt.docker import hostinfo
 
 
@@ -25,15 +26,8 @@ class HostInfoTestCase(test.NoDBTestCase):
 
     def setUp(self):
         super(HostInfoTestCase, self).setUp()
-        hostinfo.get_meminfo = self.get_meminfo
+        hostinfo.get_meminfo = stubs.get_meminfo
         hostinfo.statvfs = self.statvfs
-
-    def get_meminfo(self):
-        data = ['MemTotal:        1018784 kB\n',
-                'MemFree:          220060 kB\n',
-                'Buffers:           21640 kB\n',
-                'Cached:            63364 kB\n']
-        return data
 
     def statvfs(self):
         seq = (4096, 4096, 10047582, 7332259, 6820195,
